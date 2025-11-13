@@ -1,0 +1,31 @@
+// Prisma schema for RescuePC Licensing System
+// This schema handles automated license generation from Stripe webhooks
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model License {
+  id               String   @id @default(cuid())
+  stripeEventId    String   @unique
+  paymentIntent    String   @unique
+  checkoutSession  String?  @unique
+  customerEmail    String
+  productSku       String
+  amountCents      Int
+  currency         String   @default("usd")
+  licenseKey       String   @unique
+  status           String   @default("issued") // issued | duplicate | error | revoked
+  issuedAt         DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([customerEmail])
+  @@index([productSku])
+  @@index([status])
+}

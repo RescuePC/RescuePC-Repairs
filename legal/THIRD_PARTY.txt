@@ -1,0 +1,50 @@
+RescuePC Repairs™ – Third-Party Components Notice
+Copyright © 2025 Tyler Keesee
+
+This software package includes third-party software components and tools, each of which retains its own respective copyright, license terms, and attribution.
+
+You are responsible for complying with each third-party tool's license. RescuePC Repairs™ does not claim ownership over the following included tools and does not distribute them in modified form unless explicitly noted.
+
+-----------------------------------------------------------
+Included Third-Party Software:
+
+1. Autoruns
+   Source: Microsoft Sysinternals
+   License: Sysinternals License Agreement
+   URL: https://docs.microsoft.com/sysinternals/downloads/autoruns
+
+2. CHNTPW (Offline NT Password & Registry Editor)
+   Source: Petter Nordahl-Hagen
+   License: GPLv2
+   URL: https://pogostick.net/~pnh/ntpasswd/
+
+3. ClamAV Antivirus
+   Source: Cisco Systems, Inc.
+   License: GPLv2
+   URL: https://www.clamav.net/
+
+4. Process Hacker
+   Source: Process Hacker project
+   License: GPLv3
+   URL: https://processhacker.sourceforge.io/
+
+5. Revo Uninstaller Free
+   Source: VS Revo Group
+   License: Freeware (Personal use)
+   URL: https://www.revouninstaller.com/
+
+6. Snappy Driver Installer Origin (SDIO)
+   Source: Glenn Delahoy / SDIO Team
+   License: GNU GPLv3
+   URL: https://github.com/SDI-Tools/DriverInstaller
+
+-----------------------------------------------------------
+Additional Notes:
+
+• These tools are provided for convenience and packaged for offline functionality.  
+• All trademarks, copyrights, and software remain the property of their respective owners.  
+• RescuePC Repairs™ acts as a launch interface and does not modify or reverse-engineer these binaries.  
+• If any author of a third-party component requests removal, we will comply immediately.
+
+-----------------------------------------------------------
+This document is provided in good faith and may be updated with future releases. For concerns, corrections, or takedown notices, contact: support@rescuepcrepairs.com

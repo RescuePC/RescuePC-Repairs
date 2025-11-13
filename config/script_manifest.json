@@ -1,0 +1,34 @@
+{
+  "scripts": [
+    {
+      "file": "reset_windows_update.ps1",
+      "name": "Reset Windows Update",
+      "description": "Reset and repair Windows Update components (safe mode friendly)",
+      "category": "Repairs"
+    },
+    {
+      "file": "repair_services.ps1",
+      "name": "Repair Services",
+      "description": "Fix common Windows services (BITS, Windows Update, Audio)",
+      "category": "Repairs"
+    },
+    {
+      "file": "remove_suspicious_files.ps1",
+      "name": "Threat Scan (ClamAV)",
+      "description": "Run the offline ClamAV-based scanner on the system",
+      "category": "Security"
+    },
+    {
+      "file": "install_nvidia_driver.ps1",
+      "name": "Install NVIDIA Driver",
+      "description": "Offline NVIDIA driver installer",
+      "category": "Drivers"
+    },
+    {
+      "file": "verify_toolkit.ps1",
+      "name": "Verify Toolkit",
+      "description": "Run full toolkit verification and integrity checks",
+      "category": "Maintenance"
+    }
+  ]
+}

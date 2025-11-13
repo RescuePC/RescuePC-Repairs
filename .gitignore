@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js build output
+.next/
+out/
+dist/
+build/
+
+# Environment variables
+.env*
+!.env.example
+
+# Logs and runtime data
+logs/
+*.log
+public/.verify/
+public/downloads/
+.tmp/
+.cache/
+
+# Build artifacts and caches
+*.pack
+*.pack.gz
+*.old
+.next/
+.vercel/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Windows executables (release artifacts)
+*.exe
+!scripts/signing/sign-exe.ps1
+
+# Database
+*.db
+*.sqlite
+
+# Temporary files
+*.tmp
+*.temp

@@ -1,0 +1,43 @@
+{
+  "name": "rescuepc-minimal-store",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "desktop:build": "powershell -ExecutionPolicy Bypass -File .\\bin\\build.ps1",
+    "desktop:build:signed": "powershell -ExecutionPolicy Bypass -File .\\bin\\build.ps1 -Sign",
+    "desktop:build:commercial": "powershell -ExecutionPolicy Bypass -File .\\bin\\build.ps1 -Sign -SignMethod Commercial",
+    "desktop:audit": "powershell -ExecutionPolicy Bypass -File .\\scripts\\ops\\Run-Audit.ps1 -TimeoutSec 90 -MaxLoops 2",
+    "desktop:run": "powershell -ExecutionPolicy Bypass -File .\\bin\\RescuePC_Launcher.ps1"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "next": "16.0.1",
+    "next-sitemap": "^4.2.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "stripe": "^14.17.0",
+    "resend": "^3.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.1",
+    "prisma": "^6.19.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

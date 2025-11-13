@@ -1,0 +1,114 @@
+{
+    "app": {
+        "name": "RescuePC Repairs",
+        "version": "1.1.0",
+        "build_date": "2025-04-21",
+        "debug_mode": false,
+        "compatibility": {
+            "windows_min_version": "10.0.17763.0",
+            "windows_preferred": "Windows 10/11"
+        },
+        "ownership": {
+            "creator": "Tyler",
+            "copyright": "© 2025 Tyler/RescuePC Toolkit. All rights reserved.",
+            "contact": "[YOUR-EMAIL-HERE]",
+            "signature": "FMTK-2504-2025-TYLER-OFFLINE",
+            "verification_hash": "7c29c9d5e4a1b8f3d6e0c2a5b7e9f1d4a3c8e6b0f2d7a5c9e1b3f8d2e7c4a6b0"
+        }
+    },
+    "license": {
+        "validation": {
+            "method": "local",
+            "usb_validation": true,
+            "allow_offline_use": true,
+            "hardware_bound": false
+        },
+        "features": {
+            "available": [
+                "clean_pc",
+                "fix_network",
+                "repair_audio",
+                "windows_update",
+                "boost_performance",
+                "install_drivers",
+                "reset_password",
+                "threat_analysis",
+                "startup_repair",
+                "backup_tool",
+                "deep_uninstall"
+            ]
+        },
+        "terms": {
+            "redistribution_prohibited": true,
+            "resale_prohibited": true,
+            "reverse_engineering_prohibited": true,
+            "attribution_required": true,
+            "agreement_version": "1.3.0",
+            "usb_restriction": true
+        }
+    },
+    "ui": {
+        "theme": {
+            "background": "#222222",
+            "text": "#FFFFFF",
+            "button": "#333333",
+            "accent": "#ff9900",
+            "highlight": "#ff9900"
+        },
+        "startup": {
+            "check_drives": true,
+            "verify_scripts": true,
+            "auto_create_logs": true,
+            "show_splash": true,
+            "backup_warning": true
+        },
+        "localization": {
+            "default_language": "en-US",
+            "supports_rtl": true
+        },
+        "branding": {
+            "footer_text": "© 2025 Tyler/RescuePC. All rights reserved.",
+            "show_watermark": true,
+            "watermark_text": "Created by Tyler"
+        }
+    },
+    "scripts": {
+        "timeout_seconds": 300,
+        "log_level": "verbose",
+        "execution_policy": "bypass",
+        "max_threads": 2,
+        "error_handling": {
+            "retry_attempts": 3,
+            "retry_delay_ms": 1000,
+            "capture_screenshots": false
+        }
+    },
+    "logging": {
+        "enabled": true,
+        "logs_max_age_days": 30,
+        "logs_max_size_mb": 100,
+        "repair_logs": true,
+        "performance_logs": true,
+        "threat_logs": true,
+        "compress_older_than_days": 14,
+        "include_ownership_footer": true,
+        "ownership_footer": "RescuePC Repairs | Created by Tyler | FMTK-2504-2025"
+    },
+    "security": {
+        "allow_admin_check_bypass": false,
+        "scan_scripts_before_execution": true,
+        "require_script_signing": false,
+        "verify_integrity": true,
+        "check_watermarks": true,
+        "hidden_verification_files": [
+            ".brand_signature.lic",
+            "assets/images/.verify",
+            "scripts/.author"
+        ],
+        "usb_verification": {
+            "enabled": true,
+            "check_device_id": true,
+            "check_volume_serial": true
+        }
+    }
+} 
