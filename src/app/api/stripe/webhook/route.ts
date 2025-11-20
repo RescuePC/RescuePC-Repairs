@@ -1,38 +1,67 @@
-// Stripe webhook endpoint for automated license processing
-// Handles checkout.session.completed events and generates licenses automatically
-
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { PrismaClient } from "@prisma/client";
-import { generateLicenseKey, getLicenseTierFromSku } from "../../../../lib/license";
-import { sendLicenseEmail, sendErrorNotification } from "../../../../lib/mailer";
-import { config } from "../../../../lib/config";
-import { emptyResponse, jsonResponse } from "../../../../lib/http";
+import { prisma } from "@/lib/prisma";
+import { createHash } from "crypto";
 
-// Initialize Prisma client (connection pooling handled by Vercel)
-const prisma = new PrismaClient();
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-// Initialize Stripe client
-const stripe = new Stripe(config.stripe.secretKey, {
+if (!stripeSecretKey) {
+  throw new Error("STRIPE_SECRET_KEY is not set");
+}
+if (!webhookSecret) {
+  throw new Error("STRIPE_WEBHOOK_SECRET is not set");
+}
+
+const stripe = new Stripe(stripeSecretKey, {
   apiVersion: "2023-10-16",
 });
 
-export const runtime = "nodejs"; // Required for Stripe signature verification
+// ensure node runtime
+export const runtime = "nodejs";
+
+function generateLicenseKey(prefix: string) {
+  // Simple dev generator. You can replace with your own.
+  const random = Math.random().toString(36).slice(2, 10).toUpperCase();
+  const random2 = Math.random().toString(36).slice(2, 10).toUpperCase();
+  return `${prefix}-${random}-${random2}`;
+}
+
+function generateSecureDownloadToken(email: string) {
+  return createHash("sha256")
+    .update(`${email}${process.env.DOWNLOAD_SECRET}`)
+    .digest("hex");
+}
+
+async function sendLicenseEmail(email: string, licenseKey: string, planName: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const downloadToken = generateSecureDownloadToken(email);
+  const downloadUrl = `${baseUrl}/api/download/secure?token=${downloadToken}&email=${encodeURIComponent(email)}`;
+
+  // For now, just log - you can integrate with Resend later
+  console.log("=== LICENSE EMAIL ===");
+  console.log(`To: ${email}`);
+  console.log(`License Key: ${licenseKey}`);
+  console.log(`Plan: ${planName}`);
+  console.log(`Download URL: ${downloadUrl}`);
+  console.log("==================");
+}
 
 export async function POST(req: NextRequest) {
-  const body = await req.text();
   const sig = req.headers.get("stripe-signature");
+
+  if (!sig) {
+    return new NextResponse("Missing stripe-signature header", { status: 400 });
+  }
 
   let event: Stripe.Event;
 
   try {
-    // Verify webhook signature for security
-    event = stripe.webhooks.constructEvent(body, sig!, config.stripe.webhookSecret);
-  } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : "Unknown signature verification error";
-    console.error("Webhook signature verification failed:", err);
-    return jsonResponse({ error: `Signature verification failed: ${message}` }, { status: 400 });
+    const buf = Buffer.from(await req.arrayBuffer());
+    event = stripe.webhooks.constructEvent(buf, sig, webhookSecret!);
+  } catch (err: any) {
+    console.error("Stripe webhook signature error", err?.message);
+    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
   try {
@@ -40,141 +69,67 @@ export async function POST(req: NextRequest) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
 
-        // Extract payment details
-        const paymentIntent = (session.payment_intent as string) ?? session.id;
-        const customerEmail =
+        const email =
           session.customer_details?.email ||
-          (session.customer && typeof session.customer === "object" && "email" in session.customer ? session.customer.email : undefined) ||
-          undefined;
+          (session.customer_email as string | null);
 
-        // Get product SKU from metadata (set in your storefront)
+        if (!email) {
+          console.warn("checkout.session.completed without email, skipping");
+          break;
+        }
+
+        const planCode = session.metadata?.plan_code || "STANDARD_MONTHLY";
+        const planName =
+          session.metadata?.plan_name || "RescuePC Standard Monthly";
         const productSku =
-          session.metadata?.sku ??
-          session.metadata?.product ??
-          "BASIC"; // Default fallback
+          session.metadata?.product_sku || "RESCUEPC_STANDARD";
 
-        const amountCents = typeof session.amount_total === "number" ? session.amount_total : 0;
-        const currency = (session.currency || "usd").toLowerCase();
+        // Generate license key
+        const licenseKey = generateLicenseKey("RPC");
 
-        console.log(`Processing checkout: ${session.id}, Email: ${customerEmail}, SKU: ${productSku}`);
+        const maxDevices =
+          planCode === "OWNER_LIFETIME" ? 50 : planCode === "PRO" ? 10 : 3;
 
-        // Idempotency check: prevent duplicate license generation
-        const existing = await prisma.license.findFirst({
-          where: {
-            OR: [
-              { stripeEventId: event.id },
-              { paymentIntent: paymentIntent },
-            ],
-          },
-        });
-
-        if (existing) {
-          console.log(`Duplicate event detected: ${event.id}`);
-          return jsonResponse({ ok: true, duplicate: true });
-        }
-
-        // Generate unique license key
-        const licenseKey = generateLicenseKey();
-
-        // Determine license tier from SKU
-        const licenseTier = getLicenseTierFromSku(productSku);
-
-        // Create license record in database
-        const created = await prisma.license.create({
+        // Insert into licenses table
+        const license = await prisma.license.create({
           data: {
+            // Required fields from schema
+            customerEmail: email,
+            licenseKey: licenseKey,
+            status: "active",
+            planCode: planCode,
+            planName: planName,
+            issuedAt: new Date(),
+            
+            // Optional fields
             stripeEventId: event.id,
-            paymentIntent: paymentIntent,
+            paymentIntent: session.payment_intent as string | null,
             checkoutSession: session.id,
-            customerEmail: customerEmail ?? "unknown@unknown",
-            productSku: licenseTier,
-            amountCents,
-            currency,
-            licenseKey,
-            status: "issued",
+            amountCents: session.amount_total || 0,
+            currency: session.currency || "usd",
+            expiresAt: null, // for subscriptions you can set to current_period_end later
+            
+            // Additional metadata
+            tenantId: "default",
+            updatedAt: new Date(),
           },
         });
 
-        console.log(`License created: ${created.id} for ${customerEmail}`);
+        console.log("Created license from webhook:", license.licenseKey);
 
-        // Send license email if we have an email address
-        if (customerEmail) {
-          try {
-            await sendLicenseEmail({
-              to: customerEmail,
-              licenseKey,
-              product: licenseTier,
-              amountCents,
-              currency,
-            });
-            console.log(`License email sent to: ${customerEmail}`);
-          } catch (emailError: unknown) {
-            console.error("Failed to send license email:", emailError);
-            // Don't fail the webhook for email errors
-          }
-        } else {
-          console.warn("No customer email available for license delivery");
-        }
-
-        return jsonResponse({
-          ok: true,
-          licenseId: created.id,
-          licenseKey: created.licenseKey,
-        });
-      }
-
-      case "payment_intent.succeeded": {
-        // Optional: Handle direct payment intents if not using Checkout
-        console.log("Payment intent succeeded:", event.id);
-        return jsonResponse({ ok: true });
-      }
-
-      case "charge.refunded":
-      case "checkout.session.expired": {
-        // Optional: Handle refunds and expirations
-          console.log(`${event.type}:`, event.id);
-          return jsonResponse({ ok: true });
+        // Send license email with secure download link
+        await sendLicenseEmail(email, licenseKey, planName);
+        break;
       }
 
       default:
-        // Ignore other event types
-        console.log(`Unhandled event type: ${event.type}`);
-        return jsonResponse({ ok: true });
+        // For now log and ignore other event types
+        console.log(`Unhandled Stripe event type: ${event.type}`);
     }
 
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unknown webhook processing error";
-    console.error("Webhook processing error:", err);
-
-    // Create error record for debugging
-    try {
-      await prisma.license.create({
-        data: {
-          stripeEventId: event.id,
-          paymentIntent: "error",
-          customerEmail: "unknown@unknown",
-          productSku: "unknown",
-          amountCents: 0,
-          currency: "usd",
-          licenseKey: "ERROR",
-          status: "error",
-        },
-      });
-
-      // Send error notification
-      await sendErrorNotification(message, event.id);
-
-    } catch (dbError: unknown) {
-      console.error("Failed to log error to database:", dbError);
-    }
-
-    return jsonResponse({ error: message }, { status: 500 });
+    return new NextResponse("OK", { status: 200 });
+  } catch (err: any) {
+    console.error("Error processing Stripe webhook", err);
+    return new NextResponse("Internal error", { status: 500 });
   }
-}
-
-// Handle OPTIONS requests for CORS
-export async function OPTIONS() {
-  return emptyResponse(204, {
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Stripe-Signature",
-  });
 }

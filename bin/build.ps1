@@ -9,9 +9,9 @@ param(
 
 Write-Host "Building EXE..." -ForegroundColor Yellow
 
-ps2exe -inputFile ".\RescuePC_Launcher.ps1" -outputFile "..\RescuePC Repairs.exe" -icon "..\public\RescuePC_Icon.ico" -title "RescuePC Repairs" -description "Automated Windows repair toolkit" -version "2.0.0" -requireAdmin $true -noConsole $true
+ps2exe -inputFile ".\bin\RescuePC_Launcher.ps1" -outputFile ".\RescuePC Repairs.exe" -icon ".\public\RescuePC_Icon.ico" -title "RescuePC Repairs" -description "Automated Windows repair toolkit" -version "2.0.0" -requireAdmin $true -noConsole $true
 
-if (Test-Path "..\RescuePC Repairs.exe") {
+if (Test-Path ".\RescuePC Repairs.exe") {
     Write-Host "EXE built successfully!" -ForegroundColor Green
 
     # Optional code signing

@@ -1,22 +1,65 @@
 {
   "scripts": [
     {
-      "file": "reset_windows_update.ps1",
-      "name": "Reset Windows Update",
-      "description": "Reset and repair Windows Update components (safe mode friendly)",
-      "category": "Repairs"
+      "id": "sys_health_check",
+      "name": "System Health Check",
+      "description": "Run a quick health check on core Windows services and settings.",
+      "path": "..\\scripts\\repair\\SysHealthCheck.ps1",
+      "requires_admin": true
     },
     {
-      "file": "repair_services.ps1",
+      "id": "fix_network",
+      "name": "Repair Network",
+      "description": "Fix common network problems and reset key components.",
+      "path": "..\\scripts\\repair\\fix_network.ps1",
+      "requires_admin": true
+    },
+    {
+      "id": "repair_audio",
+      "name": "Repair Audio",
+      "description": "Reset audio devices and fix sound issues.",
+      "path": "..\\scripts\\repair\\repair_audio.ps1",
+      "requires_admin": true
+    },
+    {
+      "id": "optimize_system",
+      "name": "Performance Optimization",
+      "description": "Clean temporary files and tune basic performance settings.",
+      "path": "..\\scripts\\repair\\optimize_system.ps1",
+      "requires_admin": true
+    },
+    {
+      "id": "backup_user_data",
+      "name": "Backup User Data",
+      "description": "Backup Desktop, Documents, and Pictures to a folder you choose.",
+      "path": "..\\scripts\\repair\\backup_user_data.ps1",
+      "requires_admin": true
+    },
+    {
+      "id": "defender_deep_scan",
+      "name": "Defender Deep Scan",
+      "description": "Trigger a full Windows Defender system scan.",
+      "path": "..\\scripts\\repair\\defender_deep_scan.ps1",
+      "requires_admin": true
+    },
+    {
+      "id": "security_status_check",
+      "name": "Security Status Check",
+      "description": "Check Defender, firewall, updates, and UAC configuration and log to JSON.",
+      "path": "..\\scripts\\repair\\security_status_check.ps1",
+      "requires_admin": true
+    }
+  ]
+}
       "name": "Repair Services",
       "description": "Fix common Windows services (BITS, Windows Update, Audio)",
       "category": "Repairs"
     },
     {
-      "file": "remove_suspicious_files.ps1",
-      "name": "Threat Scan (ClamAV)",
-      "description": "Run the offline ClamAV-based scanner on the system",
-      "category": "Security"
+      "file": "reset_windows_update.ps1",
+      "name": "Reset Windows Update",
+      "description": "Reset and repair Windows Update components (safe mode friendly)",
+      "category": "Repairs"
     },
     {
       "file": "install_nvidia_driver.ps1",

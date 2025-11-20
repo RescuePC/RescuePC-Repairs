@@ -1,0 +1,81 @@
+﻿{
+    "environment":  "development",
+    "timestamp":  "2025-11-20T09:48:28Z",
+    "score":  -20,
+    "recommendations":  [
+                            {
+                                "priority":  "HIGH",
+                                "category":  "Authentication",
+                                "description":  "Add MFA for admin access and sensitive operations",
+                                "action":  "Implement multi-factor authentication"
+                            },
+                            {
+                                "priority":  "MEDIUM",
+                                "category":  "Monitoring",
+                                "description":  "Implement centralized logging and real-time alerts",
+                                "action":  "Set up security logging and monitoring"
+                            },
+                            {
+                                "priority":  "HIGH",
+                                "category":  "Backup",
+                                "description":  "Regular, encrypted backups with tested recovery procedures",
+                                "action":  "Implement secure backup strategy"
+                            },
+                            {
+                                "priority":  "MEDIUM",
+                                "category":  "Updates",
+                                "description":  "Establish a patch management process for dependencies",
+                                "action":  "Regular security updates"
+                            },
+                            {
+                                "priority":  "MEDIUM",
+                                "category":  "Testing",
+                                "description":  "Integrate security scanning into deployment pipeline",
+                                "action":  "Security testing in CI/CD"
+                            }
+                        ],
+    "issues":  [
+                   {
+                       "recommendation":  "Generate strong, unique secrets",
+                       "description":  "Weak or default secrets detected",
+                       "file":  ".env",
+                       "type":  "WEAK_SECRETS",
+                       "severity":  "CRITICAL"
+                   },
+                   {
+                       "recommendation":  "Generate strong, unique secrets",
+                       "description":  "Weak or default secrets detected",
+                       "file":  ".env.production",
+                       "type":  "WEAK_SECRETS",
+                       "severity":  "CRITICAL"
+                   },
+                   {
+                       "recommendation":  "Move secrets to environment variables",
+                       "description":  "Hardcoded secret detected",
+                       "file":  "C:\\Users\\Tyler\\Desktop\\RescuePC Repairs\\src\\lib\\config.ts",
+                       "type":  "HARDCODED_SECRET",
+                       "severity":  "CRITICAL"
+                   },
+                   {
+                       "recommendation":  "Move secrets to environment variables",
+                       "description":  "Hardcoded secret detected",
+                       "file":  "C:\\Users\\Tyler\\Desktop\\RescuePC Repairs\\scripts\\security-audit.ps1",
+                       "type":  "HARDCODED_SECRET",
+                       "severity":  "CRITICAL"
+                   },
+                   {
+                       "recommendation":  "Move secrets to environment variables",
+                       "description":  "Hardcoded secret detected",
+                       "file":  "C:\\Users\\Tyler\\Desktop\\RescuePC Repairs\\scripts\\security-audit.ps1",
+                       "type":  "HARDCODED_SECRET",
+                       "severity":  "CRITICAL"
+                   },
+                   {
+                       "port":  "5432",
+                       "description":  "Potentially sensitive port open",
+                       "recommendation":  "Ensure port is properly secured or firewalled",
+                       "type":  "OPEN_PORT",
+                       "severity":  "MEDIUM"
+                   }
+               ]
+}

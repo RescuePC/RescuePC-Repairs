@@ -1,109 +1,77 @@
-export const metadata = { title: "Download – RescuePC Repairs" };
+'use client';
 
-export default function Download() {
+import { useState } from 'react';
+
+export default function DownloadPage() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleBuyNow() {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: 'basic' })
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.message || 'Failed to start checkout');
+      }
+
+      const { checkoutUrl } = await res.json();
+      
+      if (!checkoutUrl) {
+        throw new Error('No checkout URL received');
+      }
+      
+      // Redirect to Stripe Checkout
+      window.location.href = checkoutUrl;
+      
+    } catch (err: any) {
+      console.error('Buy now error:', err);
+      setError(err.message || 'Failed to start checkout. Please try again.');
+      setLoading(false);
+    }
+  }
+
   return (
-    <main className="min-h-screen bg-slate-50 py-20">
-      <div className="max-w-4xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-4">
-            Download RescuePC Repairs
-          </h1>
-          <p className="text-xl text-slate-600">
-            Get started with professional Windows repair tools in minutes.
+    <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-4">
+      <div className="max-w-xl w-full rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg space-y-4">
+        <h1 className="text-2xl font-semibold">
+          Get RescuePC Repairs - Basic Plan
+        </h1>
+
+        <p className="text-sm text-slate-300">
+          To download the RescuePC desktop tool you need an active paid license.
+          Click <strong>Buy now</strong> to get our cheapest Basic plan via secure Stripe checkout. After payment
+          your license key and download link are emailed automatically.
+        </p>
+
+        {error && (
+          <p className="text-sm text-red-400">
+            {error}
           </p>
-        </div>
+        )}
 
-        <div className="bg-white rounded-2xl shadow-xl p-8 md:p-12">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-blue-100 rounded-full mx-auto mb-4 flex items-center justify-center">
-              <span className="text-3xl">💾</span>
-            </div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">Windows Repair Toolkit</h2>
-            <p className="text-slate-600">Version 2.0.0 • Compatible with Windows 10/11</p>
-          </div>
+        <button
+          type="button"
+          onClick={handleBuyNow}
+          disabled={loading}
+          className="w-full rounded-xl py-2 text-sm font-medium bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {loading ? "Redirecting to checkout..." : "Buy now"}
+        </button>
 
-          <div className="grid md:grid-cols-2 gap-8 mb-8">
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">System Requirements</h3>
-              <ul className="space-y-2 text-slate-600">
-                <li className="flex items-center">
-                  <span className="text-green-500 mr-3">✓</span>
-                  Windows 10 version 1903 or later
-                </li>
-                <li className="flex items-center">
-                  <span className="text-green-500 mr-3">✓</span>
-                  Windows 11 (all versions)
-                </li>
-                <li className="flex items-center">
-                  <span className="text-green-500 mr-3">✓</span>
-                  Administrator privileges required
-                </li>
-                <li className="flex items-center">
-                  <span className="text-green-500 mr-3">✓</span>
-                  500MB free disk space
-                </li>
-                <li className="flex items-center">
-                  <span className="text-green-500 mr-3">✓</span>
-                  Internet connection for activation
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">What&rsquo;s Included</h3>
-              <ul className="space-y-2 text-slate-600">
-                <li className="flex items-center">
-                  <span className="text-blue-500 mr-3">🧠</span>
-                  AI System Diagnostics
-                </li>
-                <li className="flex items-center">
-                  <span className="text-blue-500 mr-3">🔧</span>
-                  Automated Repair Tools
-                </li>
-                <li className="flex items-center">
-                  <span className="text-blue-500 mr-3">🚗</span>
-                  Driver Management
-                </li>
-                <li className="flex items-center">
-                  <span className="text-blue-500 mr-3">🛡️</span>
-                  Security & Malware Tools
-                </li>
-                <li className="flex items-center">
-                  <span className="text-blue-500 mr-3">⚡</span>
-                  Performance Optimization
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="text-center">
-            <a
-              className="inline-flex items-center px-8 py-4 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors shadow-lg text-lg mb-6"
-              href="/downloads/RescuePC-Setup.exe"
-            >
-              <span className="mr-3">⬇️</span>
-              Download RescuePC Repairs (15.2 MB)
-            </a>
-
-            <div className="text-sm text-slate-500 space-y-2">
-              <p>By downloading, you agree to our <a className="underline hover:text-blue-600" href="/legal/eula">End User License Agreement</a></p>
-              <p>Need help? Check our <a className="underline hover:text-blue-600" href="/docs/installation">installation guide</a></p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-12 text-center">
-          <div className="bg-blue-50 rounded-xl p-6 border border-blue-200">
-            <h3 className="text-lg font-semibold text-blue-900 mb-2">First Time Setup</h3>
-            <p className="text-blue-800">
-              After download, run the installer as Administrator and enter your license key when prompted.
-              The application will guide you through the initial setup process.
-            </p>
-          </div>
-        </div>
+        <p className="text-xs text-slate-500">
+          Already purchased? Check your email for your license key and private download
+          link. The app also will not run without a valid license, even if someone
+          somehow gets a copy.
+        </p>
       </div>
     </main>
   );
 }
-
-

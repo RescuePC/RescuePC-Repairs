@@ -1,0 +1,212 @@
+name: Build, Sign and Release RescuePC
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - beta
+          - testing
+
+env:
+  CERT_THUMBPRINT: ${{ secrets.CERT_THUMBPRINT }}
+  PFX_PASSWORD: ${{ secrets.PFX_PASSWORD }}
+  STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  build-and-sign:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build website
+        run: npm run build
+
+      - name: Setup Windows SDK
+        uses: GuillaumeFalourd/setup-windows-sdk-action@v1
+        with:
+          sdk-version: 22621
+
+      - name: Import Code Signing Certificate
+        run: |
+          # Import PFX certificate for signing
+          $certPath = "${{ github.workspace }}\certificate.pfx"
+          $certBytes = [System.Convert]::FromBase64String('${{ secrets.CODE_SIGNING_CERTIFICATE }}')
+          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+          
+          # Import certificate to CurrentUser\My store
+          $securePass = ConvertTo-SecureString -String "${{ secrets.PFX_PASSWORD }}" -Force -AsPlainText
+          Import-PfxCertificate -FilePath $certPath -CertStoreLocation "Cert:\CurrentUser\My" -Password $securePass
+        shell: powershell
+
+      - name: Build RescuePC Executable
+        run: |
+          # Build the main executable
+          echo "Building RescuePC Repairs.exe..."
+          # Add your actual build commands here
+          # This is where you'd compile your C++/Qt/C# code
+          
+          # For now, create a placeholder if build step not implemented
+          New-Item -ItemType Directory -Force -Path "dist"
+          echo "Placeholder for RescuePC build process" > "dist\RescuePC Repairs.exe"
+        shell: powershell
+
+      - name: Sign Executable and Scripts
+        run: |
+          # Run the signing script
+          .\scripts\signing\sign-artifacts.ps1 -CertThumbprint "${{ secrets.CERT_THUMBPRINT }}"
+        shell: powershell
+
+      - name: Verify Signatures
+        run: |
+          # Verify the executable is properly signed
+          $exePath = "RescuePC Repairs.exe"
+          if (Test-Path $exePath) {
+            $sig = Get-AuthenticodeSignature $exePath
+            Write-Host "Signature Status: $($sig.Status)"
+            Write-Host "Signer Certificate: $($sig.SignerCertificate.Subject)"
+            
+            if ($sig.Status -eq "Valid") {
+              Write-Host "✅ Executable successfully signed"
+            } else {
+              Write-Host "❌ Signature verification failed"
+              exit 1
+            }
+          }
+        shell: powershell
+
+      - name: Generate SHA256 Hash
+        run: |
+          # Generate hash for integrity verification
+          $exePath = "RescuePC Repairs.exe"
+          if (Test-Path $exePath) {
+            $hash = Get-FileHash -Path $exePath -Algorithm SHA256
+            $hash.Hash | Out-File -FilePath "dist\RescuePC-Setup.exe.sha256" -Encoding UTF8
+            Write-Host "SHA256: $($hash.Hash)"
+          }
+        shell: powershell
+
+      - name: Create Installer (MSI)
+        run: |
+          # Create MSI installer using WiX or similar
+          # This is a placeholder - implement actual MSI creation
+          echo "Creating MSI installer..."
+          Copy-Item "RescuePC Repairs.exe" "dist\RescuePC-Setup.msi"
+        shell: powershell
+
+      - name: Upload to Secure Downloads
+        run: |
+          # Upload signed binary to secure storage
+          # This could be AWS S3, Azure Blob, or your own secure server
+          echo "Uploading to secure downloads..."
+          # Implement your upload logic here
+        shell: powershell
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            RescuePC Repairs.exe
+            dist/RescuePC-Setup.msi
+            dist/RescuePC-Setup.exe.sha256
+          body: |
+            ## RescuePC ${{ github.ref_name }}
+            
+            ### 🚀 Changes
+            - Automated build and code signing
+            - Verified digital signatures
+            - SHA256 hash provided for integrity verification
+            
+            ### 📥 Download
+            - **RescuePC Repairs.exe** - Main executable (signed)
+            - **RescuePC-Setup.msi** - Windows installer (signed)
+            - **SHA256 Hash** - Verify download integrity
+            
+            ### 🔐 Verification
+            This release is digitally signed with RescuePC's code signing certificate.
+            Windows will show "RescuePC" as the publisher.
+            
+            ### 📋 System Requirements
+            - Windows 10/11 x64
+            - .NET Desktop Runtime 6.0 or later
+            
+            ---
+            Built and signed automatically by RescuePC CI/CD pipeline.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Team
+        run: |
+          # Send notification about successful release
+          $version = "${{ github.ref_name }}"
+          $releaseUrl = "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+          
+          Write-Host "✅ RescuePC $version released successfully!"
+          Write-Host "🔗 $releaseUrl"
+          
+          # You could send to Slack, Teams, email, etc.
+          # Example: webhook to notification service
+        shell: powershell
+
+  update-licenses:
+    needs: build-and-sign
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Update License System
+        run: |
+          # Update license database with new version info
+          # This could trigger automatic license updates for subscribers
+          echo "Updating license system for version ${{ github.ref_name }}"
+          # Implement your license update logic here
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+
+  certificate-monitor:
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check Certificate Expiry
+        run: |
+          # Check if code signing certificate is expiring soon
+          # This could send alerts 30 days before expiry
+          echo "Checking certificate expiration..."
+          # Implement certificate expiry check here

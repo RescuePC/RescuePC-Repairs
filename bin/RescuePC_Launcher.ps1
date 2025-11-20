@@ -1,716 +1,811 @@
-﻿# RescuePC Repairs - GUI Launcher
-# Version: 2.0 - Working Version with All Features
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
-
+#Requires -Version 5.1
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Path validation and safety functions
-$InvalidFileChars = [System.IO.Path]::GetInvalidFileNameChars()
-$InvalidPathChars = [System.IO.Path]::GetInvalidPathChars()
+$ErrorActionPreference = 'Stop'
 
-function Assert-ValidPathSegment {
-    param([Parameter(Mandatory)][string]$Segment, [string]$Label='segment')
+#region Paths / logging --------------------------------------------------------
 
-    if ([string]::IsNullOrWhiteSpace($Segment)) {
-        throw "Path $Label is null/empty."
+function Get-RescuePCBaseDirectory {
+    try {
+        if ($PSScriptRoot -and (Test-Path $PSScriptRoot)) {
+            # When running as .ps1 from bin folder
+            return (Split-Path -Parent $PSScriptRoot)
+        }
+    } catch { }
+
+    try {
+        if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
+            # When compiled to EXE or running as .ps1
+            $scriptPath = $MyInvocation.MyCommand.Path
+            # If we're in the bin folder, go up one level
+            if ($scriptPath -match '\\bin\\') {
+                return (Split-Path -Parent (Split-Path -Parent $scriptPath))
+            } else {
+                return (Split-Path -Parent $scriptPath)
+            }
+        }
+    } catch { }
+
+    # Fallback – assume we're in the project root
+    return (Get-Location).Path
+}
+
+$BaseDir  = Get-RescuePCBaseDirectory
+$ScriptDir = Join-Path $BaseDir 'scripts'
+$LogDir   = Join-Path $BaseDir 'bin\logs'
+
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
+
+function Write-LauncherLog {
+    param(
+        [string]$Message
+    )
+    try {
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        $line = "$timestamp [INFO] $Message"
+        $date = Get-Date -Format 'yyyyMMdd'
+        $logFile = Join-Path $LogDir "launcher_log_$date.log"
+        Add-Content -Path $logFile -Value $line -Encoding UTF8
+    } catch {
+        # Never let logging crash the launcher
     }
+}
 
-    foreach ($c in $InvalidFileChars) {
-        if ($Segment.Contains([string]$c)) {
-            $hex = ('0x{0:X2}' -f [int][char]$c)
-            throw "Illegal character $hex '$c' found in $Label segment: '$Segment'"
+#endregion Paths / logging -----------------------------------------------------
+
+#region License validation -----------------------------------------------------
+
+function Get-RescuePCLicense {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LicenseKey,
+        [string]$MachineId = (Get-ComputerInfo -Property CsProductUUID).CsProductUUID
+    )
+
+    $body = @{
+        licenseKey = $LicenseKey
+        machineId  = $MachineId
+    } | ConvertTo-Json
+
+    $uri = "https://rescuepcrepairs.com/api/verify-license"
+
+    try {
+        $response = Invoke-RestMethod -Uri $uri `
+                                  -Method POST `
+                                  -Body $body `
+                                  -ContentType "application/json" `
+                                  -ErrorAction Stop
+
+        if (-not $response.ok) {
+            throw "License validation failed: $($response.error)"
+        }
+
+        return $response
+    } catch {
+        $errorMsg = $_.Exception.Message
+        Write-LauncherLog "License validation error: $errorMsg"
+        
+        return [pscustomobject]@{
+            ok        = $false
+            error     = "SERVER_OR_NETWORK_ERROR"
+            message   = "Unable to validate license: $errorMsg"
         }
     }
 }
 
-function Assert-ValidPath {
-    param([Parameter(Mandatory)][string]$Path, [string]$Label='path')
+function Show-RescuePCLicenseSummary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$License
+    )
 
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        throw "Path $Label is null/empty."
-    }
+    Write-Host "=== RescuePC License Status ===" -ForegroundColor Cyan
+    Write-Host "Plan: $($License.planLabel) [$($License.plan)]"
+    Write-Host "Description: $($License.planDescription)"
 
-    foreach ($c in $InvalidPathChars) {
-        if ($Path.Contains([string]$c)) {
-            $hex = ('0x{0:X2}' -f [int][char]$c)
-            throw "Illegal character $hex '$c' found in $Label: '$Path'"
+    if ($License.lifetime) {
+        Write-Host "Type: Lifetime license (product lifetime)" -ForegroundColor Green
+    } else {
+        Write-Host "Type: Annual license"
+        if ($License.expiresAt) {
+            Write-Host "Expires: $($License.expiresAt)"
         }
     }
 
-    # Allow drive colon only after a single letter (e.g., C:)
-    if ($Path -match '^(?![A-Za-z]:\\).*:' -and $Path -notmatch '^[A-Za-z]:') {
-        throw "Colon appears in the middle of $Label: '$Path'"
-    }
+    Write-Host ""
+    Write-Host "Usage rights:" -ForegroundColor Yellow
+    Write-Host ("  Personal use:           " + ($(if ($License.rights.personalUse)  { "Allowed" } else { "Not allowed" })))
+    Write-Host ("  Commercial / repair:    " + ($(if ($License.rights.commercialUse){ "Allowed" } else { "Not allowed" })))
+    Write-Host ("  Business / fleets:      " + ($(if ($License.rights.businessUse)   { "Allowed" } else { "Not allowed" })))
+    Write-Host ("  Remote assistance:      " + ($(if ($License.rights.remoteAssistIncluded) { "Included (Enterprise)" } else { "Not included" })))
+    Write-Host ("  Dedicated support:      " + ($(if ($License.rights.dedicatedSupport) { "Included" } else { "Standard" })))
+    Write-Host ""
 }
 
-function Join-PathSafe {
+function Show-LicenseSummary {
     param(
-        [Parameter(Mandatory)][string]$Parent,
-        [Parameter(Mandatory)][string]$Child,
-        [string]$Label='child'
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$LicenseInfo
     )
-
-    Assert-ValidPath $Parent 'parent'
-    Assert-ValidPathSegment $Child $Label
-
-    Join-Path -Path $Parent -ChildPath $Child
-}
-
-function Try-IO {
-    param([scriptblock]$Do, [string]$About="")
-
-    try { & $Do }
-    catch {
-        # Show the *exact* failing line and message
-        $msg = "IO error ($About): " + $_.Exception.Message + "`n" +
-               ($_.InvocationInfo.PositionMessage)
-        [System.Windows.Forms.MessageBox]::Show($msg, 'RescuePC Repairs Error',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-        throw
+    
+    if (-not $LicenseInfo -or -not $LicenseInfo.ok) {
+        Write-Host "=== License Status: Not Activated ===" -ForegroundColor Red
+        Write-Host "Running in limited mode with basic functionality."
+        return
     }
+    
+    $license = $LicenseInfo.license
+    $planLabel = if ($LicenseInfo.planLabel) { $LicenseInfo.planLabel } elseif ($license.planName) { $license.planName } else { "Unknown Plan" }
+    $expires = if ($license -and $license.expiresAt) { [datetime]::Parse($license.expiresAt).ToString("yyyy-MM-dd") } else { "Never" }
+    
+    Write-Host "=== $planLabel License ===" -ForegroundColor Green
+    Write-Host "Plan: $planLabel"
+    Write-Host "Status: Active" -ForegroundColor Green
+    
+    if ($license.lifetime) {
+        Write-Host "Type: Lifetime License" -ForegroundColor Cyan
+    } else {
+        Write-Host "Expires: $expires"
+    }
+    
+    Write-Host "`n=== Usage Rights ===" -ForegroundColor Yellow
+    $rights = if ($LicenseInfo.rights) { $LicenseInfo.rights } else { @{} }
+    
+    # Display rights with checkmarks or X marks
+    $check = [char]0x2713 # Checkmark
+    $cross = [char]0x2717 # X mark
+    
+    Write-Host ("  {0} Personal Use" -f ($check, $cross)[!$rights.personalUse])
+    Write-Host ("  {0} Commercial/Repair Use" -f ($check, $cross)[!$rights.commercialUse])
+    Write-Host ("  {0} Business/Fleet Use" -f ($check, $cross)[!$rights.businessUse])
+    
+    if ($rights.remoteAssistIncluded) {
+        Write-Host "  $check Remote Assistance Included" -ForegroundColor Cyan
+    } else {
+        Write-Host "  $cross Remote Assistance (Enterprise only)"
+    }
+    
+    $maxDevices = if ($rights.maxDevices) { $rights.maxDevices } else { 1 }
+    Write-Host "  Max Devices: $maxDevices"
+    
+    # Show machine binding info if available
+    if ($license.machineId) {
+        $machineId = if ($license.machineId) { 
+        if ($license.machineId -is [PSCustomObject] -and $license.machineId.machineId) {
+            $license.machineId.machineId 
+        } else { 
+            $license.machineId 
+        }
+    }
+        
+        if ($machineId) {
+            $shortId = if ($machineId.Length -gt 12) { $machineId.Substring(0, 12) + "..." } else { $machineId }
+            Write-Host "`nMachine ID: $shortId" -ForegroundColor Gray
+        }
+    }
+    
+    Write-Host ""
 }
 
-# Error display function
-function Show-Err($msg) {
-    [System.Windows.Forms.MessageBox]::Show($msg, 'RescuePC Repairs Error',
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-}
+#endregion License validation -----------------------------------------------------
 
-# Global variables
-$global:RepairHistory = @()
-$global:RepairInProgress = $false
-$global:LicenseValidated = $false
-$global:CustomerInfo = $null
+#region License prompt / state -------------------------------------------------
 
-# Automated licensing via Next.js API (FREE cloud solution)
-# This replaces SharePoint with a serverless API that processes Stripe webhooks
+$global:LicenseValid   = $false
+$global:LicenseSummary = 'Limited Access Mode'
+$global:IsOwnerLicense = $false
+$global:LicenseInfo    = $null
 
-# Get the directory where this script/EXE is running from
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-if (-not $scriptDir) {
-    $scriptDir = Split-Path -Parent $PSScriptRoot
-}
-if (-not $scriptDir) {
-    $scriptDir = Get-Location
-}
+# DPAPI License Cache Functions
+$licenseCacheDir  = Join-Path $env:ProgramData "RescuePC"
+$licenseCachePath = Join-Path $licenseCacheDir "license_cache.xml"
 
-
-# Enhanced logging function
-function Write-Log {
+function Save-LicenseCache {
     param(
-        [string]$Message,
-        [ValidateSet("INFO", "WARNING", "ERROR", "SUCCESS")]
-        [string]$Level = "INFO"
+        [string]$Email,
+        [string]$LicenseKey,
+        [bool]$IsOwner,
+        [object]$LicenseData
     )
+    
+    try {
+        if (-not (Test-Path $licenseCacheDir)) {
+            New-Item -ItemType Directory -Path $licenseCacheDir -Force | Out-Null
+        }
 
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logEntry = "$timestamp [$Level] $Message"
+        $cacheObject = [pscustomobject]@{
+            Email      = $Email
+            LicenseKey = $LicenseKey
+            IsOwner    = $IsOwner
+            LicenseData = $LicenseData
+            CachedAt   = (Get-Date)
+        }
 
-    $logDir = Join-Path $scriptDir "logs"
-    if (-not (Test-Path $logDir)) {
-        New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+        # Protect with DPAPI so only THIS Windows user can decrypt
+        $cacheObject | Export-Clixml -Path $licenseCachePath
+        Write-LauncherLog "License cache saved for $Email (Owner: $IsOwner)"
+    } catch {
+        Write-LauncherLog "ERROR saving license cache: $($_.Exception.Message)"
     }
+}
 
-    $logPath = Join-Path $logDir "launcher_log_$(Get-Date -Format 'yyyyMMdd').log"
+function Get-LicenseCache {
+    $CachedLicense = $null
+    
+    if (Test-Path $licenseCachePath) {
+        try {
+            $CachedLicense = Import-Clixml -Path $licenseCachePath
+            Write-LauncherLog "License cache loaded for $($CachedLicense.Email)"
+        } catch {
+            Write-LauncherLog "ERROR loading license cache: $($_.Exception.Message)"
+            $CachedLicense = $null
+        }
+    }
+    
+    return $CachedLicense
+}
+
+function Test-CachedLicense {
+    param([object]$CachedLicense)
+    
+    if (-not $CachedLicense -or -not $CachedLicense.Email -or -not $CachedLicense.LicenseKey) {
+        return $false
+    }
 
     try {
-        Add-Content -Path $logPath -Value $logEntry -ErrorAction SilentlyContinue
+        Write-LauncherLog "Testing cached license for $($CachedLicense.Email)..."
+        
+        $licenseResult = Invoke-RescuePCLicenseCheck -LicenseKey $CachedLicense.LicenseKey -CustomerEmail $CachedLicense.Email
+
+        if ($licenseResult.valid) {
+            Write-LauncherLog "Cached license is still valid"
+            return $licenseResult
+        } else {
+            Write-LauncherLog "Cached license is no longer valid"
+            return $false
+        }
     } catch {
-        # Silent fail if log write fails
-    }
-}
-
-# Check if running as administrator
-function Test-Administrator {
-    $user = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($user)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-# API-based licensing (FREE cloud solution)
-# All licensing functions use the Next.js API endpoints
-
-function Test-InternetConnection {
-    try {
-        $request = [System.Net.WebRequest]::Create("https://rescuepcrepairs.com/api/health")
-        $request.Timeout = 5000
-        $response = $request.GetResponse()
-        $response.Close()
-        return $true
-    } catch {
+        Write-LauncherLog "ERROR testing cached license: $($_.Exception.Message)"
         return $false
     }
 }
 
-function Validate-LicenseAPI {
-    param(
-        [Parameter(Mandatory=$true)][string]$LicenseKey,
-        [Parameter(Mandatory=$true)][string]$CustomerEmail
-    )
-
-    try {
-        $body = @{
-            licenseKey = $LicenseKey
-            machineId = $env:COMPUTERNAME
-        } | ConvertTo-Json
-
-        $response = Invoke-RestMethod -Uri "https://rescuepcrepairs.com/api/activate" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 10
-
-        if ($response.token) {
-            return [pscustomobject]@{
-                Valid = $true
-                Product = $response.plan
-                Tier = $response.plan
-                CustomerEmail = $response.email
-                Token = $response.token
-                ExpiresAt = $response.expiresAt
-            }
-        } else {
-            return [pscustomobject]@{
-                Valid = $false
-                Product = $null
-                Tier = $null
-                CustomerEmail = $null
-                Token = $null
-                ExpiresAt = $null
-            }
-        }
-    } catch {
-        Write-Log "License validation API error: $($_.Exception.Message)" -Level "ERROR"
-        return [pscustomobject]@{
-            Valid = $false
-            Product = $null
-            Tier = $null
-            CustomerEmail = $null
-            Token = $null
-            ExpiresAt = $null
-        }
-    }
-}
-
 function Show-LicensePrompt {
-
-    $licenseForm = New-Object System.Windows.Forms.Form
-    $licenseForm.Text = "RescuePC License Validation"
-    $licenseForm.Size = New-Object System.Drawing.Size(450, 280)
-    $licenseForm.StartPosition = "CenterScreen"
-    $licenseForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
-    $licenseForm.MaximizeBox = $false
-    $licenseForm.MinimizeBox = $false
-
-    # Header label
-    $headerLabel = New-Object System.Windows.Forms.Label
-    $headerLabel.Text = "Enter your RescuePC License Key"
-    $headerLabel.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    $headerLabel.Size = New-Object System.Drawing.Size(400, 30)
-    $headerLabel.Location = New-Object System.Drawing.Point(20, 20)
-    $licenseForm.Controls.Add($headerLabel)
-
-    # Description label
-    $descLabel = New-Object System.Windows.Forms.Label
-    $descLabel.Text = "Please enter your license key to access RescuePC Repairs Toolkit."
-    $descLabel.Size = New-Object System.Drawing.Size(400, 40)
-    $descLabel.Location = New-Object System.Drawing.Point(20, 60)
-    $licenseForm.Controls.Add($descLabel)
-
-    # License key textbox
-    $licenseTextBox = New-Object System.Windows.Forms.TextBox
-    $licenseTextBox.Size = New-Object System.Drawing.Size(350, 25)
-    $licenseTextBox.Location = New-Object System.Drawing.Point(45, 110)
-    $licenseForm.Controls.Add($licenseTextBox)
-
-    # Email textbox
-    $emailLabel = New-Object System.Windows.Forms.Label
-    $emailLabel.Text = "Email Address:"
-    $emailLabel.Size = New-Object System.Drawing.Size(100, 20)
-    $emailLabel.Location = New-Object System.Drawing.Point(45, 145)
-    $licenseForm.Controls.Add($emailLabel)
-
-    $emailTextBox = New-Object System.Windows.Forms.TextBox
-    $emailTextBox.Size = New-Object System.Drawing.Size(350, 25)
-    $emailTextBox.Location = New-Object System.Drawing.Point(45, 165)
-    $licenseForm.Controls.Add($emailTextBox)
-
-    # OK button
-    $okButton = New-Object System.Windows.Forms.Button
-    $okButton.Text = "Validate License"
-    $okButton.Size = New-Object System.Drawing.Size(100, 30)
-    $okButton.Location = New-Object System.Drawing.Point(150, 210)
-    $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $licenseForm.AcceptButton = $okButton
-    $licenseForm.Controls.Add($okButton)
-
-    # Cancel button
-    $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = "Cancel"
-    $cancelButton.Size = New-Object System.Drawing.Size(80, 30)
-    $cancelButton.Location = New-Object System.Drawing.Point(260, 210)
-    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $licenseForm.CancelButton = $cancelButton
-    $licenseForm.Controls.Add($cancelButton)
-
-    $result = $licenseForm.ShowDialog()
-
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'RescuePC - Activate License'
+    $form.Size = New-Object System.Drawing.Size(500, 350)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    
+    # Title
+    $labelTitle = New-Object System.Windows.Forms.Label
+    $labelTitle.Location = New-Object System.Drawing.Point(20, 20)
+    $labelTitle.Size = New-Object System.Drawing.Size(440, 30)
+    $labelTitle.Text = 'Enter Your License Information'
+    $labelTitle.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($labelTitle)
+    
+    # Email Label
+    $labelEmail = New-Object System.Windows.Forms.Label
+    $labelEmail.Location = New-Object System.Drawing.Point(20, 70)
+    $labelEmail.Size = New-Object System.Drawing.Size(100, 20)
+    $labelEmail.Text = 'Email:'
+    $form.Controls.Add($labelEmail)
+    
+    # Email Input
+    $textBoxEmail = New-Object System.Windows.Forms.TextBox
+    $textBoxEmail.Location = New-Object System.Drawing.Point(120, 67)
+    $textBoxEmail.Size = New-Object System.Drawing.Size(340, 20)
+    $form.Controls.Add($textBoxEmail)
+    
+    # License Key Label
+    $labelKey = New-Object System.Windows.Forms.Label
+    $labelKey.Location = New-Object System.Drawing.Point(20, 110)
+    $labelKey.Size = New-Object System.Drawing.Size(100, 20)
+    $labelKey.Text = 'License Key:'
+    $form.Controls.Add($labelKey)
+    
+    # License Key Input
+    $textBoxKey = New-Object System.Windows.Forms.TextBox
+    $textBoxKey.Location = New-Object System.Drawing.Point(120, 107)
+    $textBoxKey.Size = New-Object System.Drawing.Size(340, 20)
+    $form.Controls.Add($textBoxKey)
+    
+    # Status Label
+    $labelStatus = New-Object System.Windows.Forms.Label
+    $labelStatus.Location = New-Object System.Drawing.Point(20, 150)
+    $labelStatus.Size = New-Object System.Drawing.Size(440, 40)
+    $labelStatus.Text = 'Enter your email and license key to activate RescuePC.'
+    $form.Controls.Add($labelStatus)
+    
+    # Activate Button
+    $buttonActivate = New-Object System.Windows.Forms.Button
+    $buttonActivate.Location = New-Object System.Drawing.Point(300, 200)
+    $buttonActivate.Size = New-Object System.Drawing.Size(80, 30)
+    $buttonActivate.Text = 'Activate'
+    $buttonActivate.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.AcceptButton = $buttonActivate
+    $form.Controls.Add($buttonActivate)
+    
+    # Cancel Button
+    $buttonCancel = New-Object System.Windows.Forms.Button
+    $buttonCancel.Location = New-Object System.Drawing.Point(380, 200)
+    $buttonCancel.Size = New-Object System.Drawing.Size(80, 30)
+    $buttonCancel.Text = 'Cancel'
+    $buttonCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.CancelButton = $buttonCancel
+    $form.Controls.Add($buttonCancel)
+    
+    # Purchase Link
+    $linkPurchase = New-Object System.Windows.Forms.LinkLabel
+    $linkPurchase.Location = New-Object System.Drawing.Point(20, 200)
+    $linkPurchase.Size = New-Object System.Drawing.Size(200, 20)
+    $linkPurchase.Text = 'Purchase a License'
+    $linkPurchase.Add_Click({ Start-Process 'https://rescuepcrepairs.com/pricing' })
+    $form.Controls.Add($linkPurchase)
+    
+    # Validation function
+    $validateInputs = {
+        $isValid = $textBoxEmail.Text -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' -and $textBoxKey.Text.Trim().Length -ge 10
+        $buttonActivate.Enabled = $isValid
+    }
+    
+    $textBoxEmail.Add_TextChanged($validateInputs)
+    $textBoxKey.Add_TextChanged($validateInputs)
+    
+    $result = $form.ShowDialog()
+    
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $licenseKey = $licenseTextBox.Text.Trim()
-        $customerEmail = $emailTextBox.Text.Trim()
-
-        if ([string]::IsNullOrEmpty($licenseKey)) {
-            [System.Windows.Forms.MessageBox]::Show("Please enter a license key.", "Invalid License", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-            return $false
-        }
-
-        Write-Log "Validating license key..." -Level "INFO"
-
-        $validationResult = Validate-LicenseAPI -LicenseKey $licenseKey -CustomerEmail $customerEmail
-
-        if ($validationResult.Valid) {
-            $global:LicenseValidated = $true
-            $global:CustomerInfo = @{
-                CustomerName = "Customer"
-                Email = $validationResult.CustomerEmail
-                PackageName = $validationResult.Product
-                Tier = $validationResult.Tier
-                IssuedAt = $validationResult.IssuedAt
-            }
-
-            Write-Log "License validated for email: $($validationResult.CustomerEmail) - Product: $($validationResult.Product)" -Level "SUCCESS"
-
-            [System.Windows.Forms.MessageBox]::Show(
-                "License validated successfully!`n`nEmail: $($validationResult.CustomerEmail)`nProduct: $($validationResult.Product)`nTier: $($validationResult.Tier)",
-                "License Validated",
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Information)
-
-            return $true
-        } else {
-            [System.Windows.Forms.MessageBox]::Show("Invalid license key or email combination. Please check your license details and try again.", "License Validation Failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-            Write-Log "License validation failed for key: $licenseKey, email: $customerEmail" -Level "WARNING"
-            return $false
+        return @{
+            Email = $textBoxEmail.Text.Trim()
+            LicenseKey = $textBoxKey.Text.Trim()
         }
     }
-
-    return $false
-}
-
-# Simple button creation function
-function New-SimpleButton {
-    param(
-        [string]$Text,
-        [string]$ActionName
-    )
     
-    $button = New-Object System.Windows.Forms.Button
-    $button.Text = $Text
-    $button.Name = $ActionName
-    $button.Size = New-Object System.Drawing.Size(200, 40)
-    $button.Margin = New-Object System.Windows.Forms.Padding(5)
-    $button.BackColor = [System.Drawing.Color]::White
-    $button.ForeColor = [System.Drawing.Color]::Black
-    $button.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $button.Cursor = [System.Windows.Forms.Cursors]::Hand
-    
-    $button.Add_Click({
-        Invoke-ButtonAction -action $this.Name
+    return $null
+    $result = @{
+        Valid   = $false
+        Summary = 'Limited Access Mode'
+        IsOwner = $false
+    }
+
+    $form              = New-Object System.Windows.Forms.Form
+    $form.Text         = 'RescuePC License Validation'
+    $form.StartPosition = 'CenterScreen'
+    $form.Size         = New-Object System.Drawing.Size(420,220)
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox  = $false
+    $form.MinimizeBox  = $false
+    $form.TopMost      = $true
+
+    $lblTitle          = New-Object System.Windows.Forms.Label
+    $lblTitle.Text     = 'Enter your RescuePC License Key'
+    $lblTitle.AutoSize = $true
+    $lblTitle.Font     = New-Object System.Drawing.Font('Segoe UI', 11,[System.Drawing.FontStyle]::Bold)
+    $lblTitle.Location = New-Object System.Drawing.Point(20,15)
+
+    $lblKey            = New-Object System.Windows.Forms.Label
+    $lblKey.Text       = 'License Key:'
+    $lblKey.AutoSize   = $true
+    $lblKey.Location   = New-Object System.Drawing.Point(20,55)
+
+    $txtKey            = New-Object System.Windows.Forms.TextBox
+    $txtKey.Width      = 360
+    $txtKey.Location   = New-Object System.Drawing.Point(20,72)
+
+    $lblEmail          = New-Object System.Windows.Forms.Label
+    $lblEmail.Text     = 'Email Address:'
+    $lblEmail.AutoSize   = $true
+    $lblEmail.Location   = New-Object System.Drawing.Point(20,102)
+
+    $txtEmail          = New-Object System.Windows.Forms.TextBox
+    $txtEmail.Width    = 360
+    $txtEmail.Location = New-Object System.Drawing.Point(20,119)
+
+    $btnValidate       = New-Object System.Windows.Forms.Button
+    $btnValidate.Text  = 'Validate License'
+    $btnValidate.Width = 130
+    $btnValidate.Location = New-Object System.Drawing.Point(140,155)
+
+    $btnCancel         = New-Object System.Windows.Forms.Button
+    $btnCancel.Text    = 'Cancel'
+    $btnCancel.Width   = 80
+    $btnCancel.Location = New-Object System.Drawing.Point(280,155)
+
+    $form.Controls.AddRange(@(
+        $lblTitle,$lblKey,$txtKey,$lblEmail,$txtEmail,$btnValidate,$btnCancel
+    ))
+
+    # Global flags used later by main UI
+    $Global:IsLimitedMode  = $true
+    $Global:CurrentLicense = $null
+
+    $btnValidate.Add_Click({
+        try {
+            $licenseKey    = $txtKey.Text
+            $customerEmail = $txtEmail.Text
+
+            $result = Invoke-RescuePCLicenseCheck `
+                -LicenseKey $licenseKey `
+                -CustomerEmail $customerEmail
+
+            if (-not $result.valid) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Unable to validate license online. The toolkit will run in Limited Access Mode.`n`nError: $($result.error)",
+                    "Licensing Connection Warning",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                )
+
+                $Global:IsLimitedMode  = $true
+                $Global:CurrentLicense = $null
+            }
+            else {
+                $Global:IsLimitedMode  = $false
+                $Global:CurrentLicense = $result.license
+
+                [System.Windows.Forms.MessageBox]::Show(
+                    "License validated successfully.`n`nPlan: $($result.license.planName)",
+                    "License Validated",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Information
+                )
+            }
+
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+            $form.Close()
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show(
+                "The running command stopped due to an unexpected error:`n$($_.Exception.Message)",
+                "RescuePC Repairs Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+
+            # Fail safe into limited mode
+            $Global:IsLimitedMode  = $true
+            $Global:CurrentLicense = $null
+
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $form.Close()
+        }
     })
-    
-    return $button
+
+    $btnCancel.Add_Click({
+        $Global:IsLimitedMode  = $true
+        $Global:CurrentLicense = $null
+        $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $form.Close()
+    })
+
+    # Show the dialog before launching main toolkit UI
+    $null = $form.ShowDialog()
+
+    return $result
 }
 
-# Function to handle button actions
-function Invoke-ButtonAction {
-    param ([string]$action)
-    
-    if ($global:RepairInProgress) {
-        [System.Windows.Forms.MessageBox]::Show("A repair is currently in progress. Please wait for it to complete.", 
-            "Operation in Progress", 
-            [System.Windows.Forms.MessageBoxButtons]::OK, 
-            [System.Windows.Forms.MessageBoxIcon]::Information)
+#endregion License prompt / state ----------------------------------------------
+
+#region Script map + starter ---------------------------------------------------
+
+# Map button actions to actual script paths
+$ScriptMap = @{
+    'SysHealthCheck'     = Join-Path $ScriptDir 'security\SysHealthCheck.ps1'
+    'CleanPC'            = Join-Path $ScriptDir 'repair\optimize_system.ps1'
+    'FixNetwork'         = Join-Path $ScriptDir 'repair\fix_network.ps1'
+    'RepairAudio'        = Join-Path $ScriptDir 'repair\repair_audio.ps1'
+    'RepairServices'     = Join-Path $ScriptDir 'repair\repair_services.ps1'
+    'RebuildServices'    = Join-Path $ScriptDir 'repair\rebuild_windows_services.ps1'
+    'FixDisk'            = Join-Path $ScriptDir 'repair\disk_partition_fix.ps1'
+    'StartupRepair'      = Join-Path $ScriptDir 'repair\fix_startup_issues.ps1'
+    'DriverPacks'        = Join-Path $ScriptDir 'drivers\direct_sdio_download.ps1'
+    'InstallGameDriver'  = Join-Path $ScriptDir 'drivers\install_game_driver.ps1'
+    'MalwareScan'        = Join-Path $ScriptDir 'security\malware_scan_removal.ps1'
+    'VerifySystem'       = Join-Path $ScriptDir 'security\verify_system.ps1'
+    'OptimizeSystem'     = Join-Path $ScriptDir 'repair\boost_performance.ps1'
+    'BackupTool'         = Join-Path $ScriptDir 'repair\backup_user_data.ps1'
+    'AISystemDiag'       = Join-Path $ScriptDir 'security\ai_system_diagnostics.ps1'
+}
+
+# For now, we allow all buttons even in limited mode
+$AllowedInLimitedMode = $ScriptMap.Keys
+
+function Start-RepairScript {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Key
+    )
+
+    if (-not $ScriptMap.ContainsKey($Key)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Unknown repair action: $Key",
+            "RescuePC Repairs Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
         return
     }
-    
-    $global:RepairInProgress = $true
-    Write-Log "Button clicked: $action"
-    
+
+    if (-not (Test-Path $ScriptMap[$Key])) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Repair script not found:`n$($ScriptMap[$Key])",
+            "RescuePC Repairs Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return
+    }
+
+    if (-not $global:LicenseValid -and ($Key -notin $AllowedInLimitedMode)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "This function normally requires a valid license. You are currently in Limited Access Mode.",
+            "License Required",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return
+    }
+
+    $scriptPath = $ScriptMap[$Key]
+    Write-LauncherLog "Button clicked: $Key ($scriptPath)"
+
     try {
-        switch ($action) {  
-            "SysHealthCheck" {
-                $scriptPath = "$scriptDir\scripts\security\SysHealthCheck.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $LASTEXITCODE
-                    if ($result -eq 0) {
-                        Write-Log "System Health Check completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("System Health Check completed successfully!", "Health Check Complete", 0, 64)
-                    } else {
-                        [System.Windows.Forms.MessageBox]::Show("System Health Check failed (exit $result).", "Health Check Failed", 0, 16)
-                    }
-                }
-            }
-            "CleanPC" {
-                $scriptPath = "$scriptDir\scripts\repair\boost_performance.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $LASTEXITCODE
-                    if ($result -eq 0) {
-                        Write-Log "System cleaning completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("System cleaning completed successfully!", "Cleanup Complete", 0, 64)
-                    } else {
-                        [System.Windows.Forms.MessageBox]::Show("System cleaning failed (exit $result).", "Cleanup Failed", 0, 16)
-                    }
-                }
-            }
-            "FixNetwork" {
-                $scriptPath = "$scriptDir\scripts\repair\fix_network.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $LASTEXITCODE
-                    if ($result -eq 0) {
-                        Write-Log "Network fix completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Network repair completed successfully!", "Network Repair Complete", 0, 64)
-                    } else {
-                        [System.Windows.Forms.MessageBox]::Show("Network repair failed (exit $result).", "Network Repair Failed", 0, 16)
-                    }
-                }
-            }
-            "RepairAudio" {
-                $scriptPath = "$scriptDir\scripts\repair\repair_audio.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $LASTEXITCODE
-                    if ($result -eq 0) {
-                        Write-Log "Audio repair completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Audio repair completed successfully!", "Audio Repair Complete", 0, 64)
-                    } else {
-                        [System.Windows.Forms.MessageBox]::Show("Audio repair failed (exit $result).", "Audio Repair Failed", 0, 16)
-                    }
-                }
-            }
-            "RepairServices" {
-                $scriptPath = "$scriptDir\scripts\repair\repair_services.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Services repair completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Windows Services repair completed successfully!", 
-                            "Services Repair Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "RebuildWindowsServices" {
-                $scriptPath = "$scriptDir\scripts\repair\rebuild_windows_services.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Windows Services rebuild completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Windows Services rebuild completed successfully!", 
-                            "Services Rebuild Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "FixDisk" {
-                $scriptPath = "$scriptDir\scripts\repair\disk_partition_fix.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Disk fix completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Disk repair completed successfully!", 
-                            "Disk Repair Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "InstallGameDriver" {
-                $scriptPath = "$scriptDir\scripts\drivers\install_game_driver.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Game driver installation completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Game driver installation completed successfully!", 
-                            "Game Driver Installation Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "StartupRepair" {
-                $scriptPath = "$scriptDir\scripts\repair\fix_startup_issues.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Startup repair completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Startup repair completed successfully!", 
-                            "Startup Repair Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "BackupTool" {
-                $scriptPath = "$scriptDir\scripts\repair\backup_user_data.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Backup completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Backup completed successfully!", 
-                            "Backup Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "OptimizeSystem" {
-                $scriptPath = "$scriptDir\scripts\repair\optimize_system.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "System optimization completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("System optimization completed successfully!", 
-                            "System Optimization Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "VerifySystem" {
-                $scriptPath = "$scriptDir\scripts\security\verify_system.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "System verification completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("System verification completed successfully! Check the reports folder for detailed results.", "System Verification Complete", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "MalwareScan" {
-                $scriptPath = "$scriptDir\scripts\security\malware_scan_removal.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Malware scan and removal completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Malware scan and removal completed successfully!",
-                            "Malware Scan Complete",
-                            [System.Windows.Forms.MessageBoxButtons]::OK,
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "AISystemDiagnostics" {
-                $scriptPath = "$scriptDir\scripts\security\ai_system_diagnostics.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $LASTEXITCODE
-                    if ($result -eq 0) {
-                        Write-Log "AI diagnostics completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Diagnostics completed successfully.`nLog saved to diagnostics folder.","Diagnostics",0,64)
-                    } elseif ($result -eq 10) {
-                        [System.Windows.Forms.MessageBox]::Show("Diagnostics completed with warnings. Check the log.","Diagnostics",0,48)
-                    } elseif ($result -eq 124) {
-                        [System.Windows.Forms.MessageBox]::Show("Diagnostics timed out.","Diagnostics",0,48)
-                    } else {
-                        [System.Windows.Forms.MessageBox]::Show("Diagnostics failed (exit $result). See logs.","Diagnostics",0,16)
-                    }
-                }
-            }
-            "SDIO" {
-                $scriptPath = "$scriptDir\scripts\drivers\direct_sdio_download.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $LASTEXITCODE
-                    if ($result -eq 0) {
-                        Write-Log "SDIO download completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("SDIO download completed successfully!", "SDIO Complete", 0, 64)
-                    } else {
-                        [System.Windows.Forms.MessageBox]::Show("SDIO download failed (exit $result).", "SDIO Failed", 0, 16)
-                    }
-                }
-            }
-            "ViewLogs" {
-                $logsPath = "$scriptDir\logs"
-                if (Test-Path $logsPath) {
-                    Start-Process "explorer.exe" -ArgumentList $logsPath
-                    Write-Log "Opened logs directory" -Level "INFO"
-                }
-            }
-            "CheckComponents" {
-                $scriptPath = "$scriptDir\scripts\security\verify_system.ps1"
-                if (Test-Path $scriptPath) {
-                    & $scriptPath
-                    $result = $?
-                    if ($result) {
-                        Write-Log "Component check completed successfully" -Level "SUCCESS"
-                        [System.Windows.Forms.MessageBox]::Show("Component check completed successfully!", 
-                            "Component Check Complete", 
-                            [System.Windows.Forms.MessageBoxButtons]::OK, 
-                            [System.Windows.Forms.MessageBoxIcon]::Information)
-                    }
-                }
-            }
-            "Help" {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "RescuePC Repairs Toolkit v2.0`n`nThis toolkit provides comprehensive tools to repair and optimize Windows systems.`n`nFeatures include:`n- System cleaning and optimization`n- Network and audio repair`n- Windows Update fixes`n- Driver management`n- Security scanning`n- Performance boosting`n- And much more!`n`nFor detailed documentation, check the documentation folder.",
-                    "About RescuePC Repairs",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Information)
-            }
-            default {
-                [System.Windows.Forms.MessageBox]::Show("This feature is not yet implemented.", "Not Implemented", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-            }
-        }
-    }
-    catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Error executing action $action - $errorMessage" -Level "ERROR"
-        [System.Windows.Forms.MessageBox]::Show("Error executing action - $errorMessage", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    }
-    finally {
-        $global:RepairInProgress = $false
-    }
-}
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $psi.UseShellExecute = $true
+        $psi.Verb = "runas"   # Always ask for admin
 
-# Main function to create and show GUI
-function Show-RescuePCRepairGUI {
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "RescuePC Repairs Toolkit v2.0"
-    $form.Size = New-Object System.Drawing.Size(1200, 800)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(240, 240, 240)
-    
-    # Header
-    $headerLabel = New-Object System.Windows.Forms.Label
-    $headerLabel.Text = "RescuePC Repairs Toolkit"
-    $headerLabel.Font = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
-    $headerLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
-    $headerLabel.Size = New-Object System.Drawing.Size(400, 30)
-    $headerLabel.Location = New-Object System.Drawing.Point(20, 20)
-    $form.Controls.Add($headerLabel)
-    
-    # Status indicator
-    $isAdmin = Test-Administrator
-    $statusLabel = New-Object System.Windows.Forms.Label
-    $statusLabel.Text = if ($isAdmin) { "Running as Administrator" } else { "Limited Access Mode" }
-    $statusLabel.ForeColor = if ($isAdmin) { [System.Drawing.Color]::Green } else { [System.Drawing.Color]::Orange }
-    $statusLabel.Size = New-Object System.Drawing.Size(200, 20)
-    $statusLabel.Location = New-Object System.Drawing.Point(20, 60)
-    $form.Controls.Add($statusLabel)
-    
-    # FlowLayoutPanel for buttons
-    $flowPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-    $flowPanel.Location = New-Object System.Drawing.Point(20, 100)
-    $flowPanel.Size = New-Object System.Drawing.Size(1160, 650)
-    $flowPanel.AutoScroll = $true
-    $form.Controls.Add($flowPanel)
-    
-    # Add all buttons - minimal, focused toolkit
-    $flowPanel.Controls.Add((New-SimpleButton -Text "System Health Check" -ActionName "SysHealthCheck"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Clean My PC" -ActionName "CleanPC"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Fix Network" -ActionName "FixNetwork"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Repair Audio" -ActionName "RepairAudio"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Repair Services" -ActionName "RepairServices"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Rebuild Windows Services" -ActionName "RebuildWindowsServices"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Fix Disk" -ActionName "FixDisk"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Startup Repair" -ActionName "StartupRepair"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Driver Packs (SDIO)" -ActionName "SDIO"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Install Game Driver" -ActionName "InstallGameDriver"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Malware Scan & Removal" -ActionName "MalwareScan"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Verify System" -ActionName "VerifySystem"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Optimize System" -ActionName "OptimizeSystem"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Backup Tool" -ActionName "BackupTool"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "AI System Diagnostics" -ActionName "AISystemDiagnostics"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "View Logs" -ActionName "ViewLogs"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Check Components" -ActionName "CheckComponents"))
-    $flowPanel.Controls.Add((New-SimpleButton -Text "Help" -ActionName "Help"))
-    
-    # Log the application start
-    Write-Log "RescuePC Repairs Launcher started. Running as administrator: $isAdmin" -Level $(if ($isAdmin) { "SUCCESS" } else { "WARNING" })
-    
-    # Show the form
-    $form.ShowDialog()
-}
-
-# API Licensing configuration (FREE cloud solution)
-# Uses Next.js serverless functions with Stripe webhooks
-# Automatically processes payments and generates licenses
-
-# Main application execution with proper error handling
-try {
-    # Validate base directory
-    Assert-ValidPath $scriptDir 'scriptDir'
-
-    Try-IO { Test-Path $scriptDir } 'validating script directory' | Out-Null
-    if (-not $?) {
-        throw "Script directory does not exist: $scriptDir"
-    }
-
-    # Create logs directory safely
-    $logDir = Join-PathSafe $scriptDir "logs" -Label 'logs directory'
-    Try-IO {
-        if (-not (Test-Path $logDir)) {
-            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-        }
-    } 'creating logs directory'
-
-    # Test API licensing connection
-    Write-Log "Testing licensing server connection..." -Level "INFO"
-    if (-not (Test-InternetConnection)) {
+        [System.Diagnostics.Process]::Start($psi) | Out-Null
+    } catch {
+        Write-LauncherLog "ERROR launching $($Key): $($Error[0].Exception.Message)"
         [System.Windows.Forms.MessageBox]::Show(
-            "Unable to connect to the licensing server. Please check your internet connection.`n`nThe application will continue with limited functionality.",
-            "Licensing Connection Warning",
+            "Failed to start repair script:`n$($ScriptMap[$Key])`n`n$($Error[0].Exception.Message)",
+            "RescuePC Repairs Error",
             [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning)
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+}
 
-        Write-Log "Licensing server connection failed - continuing with limited functionality" -Level "WARNING"
+#endregion Script map + starter ------------------------------------------------
+
+#region Main UI ----------------------------------------------------------------
+
+function New-MainForm {
+    $form              = New-Object System.Windows.Forms.Form
+    $form.Text         = 'RescuePC Repairs Toolkit v2.0'
+    $form.StartPosition = 'CenterScreen'
+    $form.Size         = New-Object System.Drawing.Size(1050,340)
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox  = $false
+
+    $lblTitle          = New-Object System.Windows.Forms.Label
+    $lblTitle.Text     = 'RescuePC Repairs Toolkit'
+    $lblTitle.Font     = New-Object System.Drawing.Font('Segoe UI', 14,[System.Drawing.FontStyle]::Bold)
+    $lblTitle.AutoSize = $true
+    $lblTitle.Location = New-Object System.Drawing.Point(20,15)
+
+    $lblMode           = New-Object System.Windows.Forms.Label
+    $lblMode.AutoSize  = $true
+    $lblMode.Location  = New-Object System.Drawing.Point(22,45)
+
+    if ($global:LicenseValid) {
+        $lblMode.Text      = $global:LicenseSummary
+        $lblMode.ForeColor = [System.Drawing.Color]::Green
     } else {
-        Write-Log "Licensing server connection successful" -Level "SUCCESS"
+        $lblMode.Text      = 'Limited Access Mode'
+        $lblMode.ForeColor = [System.Drawing.Color]::Orange
+    }
 
-        # Show license prompt
-        Write-Log "Prompting for license validation..." -Level "INFO"
-        $licenseValid = Show-LicensePrompt
+    $form.Controls.Add($lblTitle)
+    $form.Controls.Add($lblMode)
 
-        if (-not $licenseValid) {
-            Write-Log "License validation failed or was cancelled" -Level "WARNING"
-            [System.Windows.Forms.MessageBox]::Show("License validation is required to use RescuePC Repairs Toolkit.", "License Required", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-            exit 0
+    # Helper to add buttons in a grid
+    function Add-Button {
+        param(
+            [string]$Text,
+            [int]$Row,
+            [int]$Col,
+            [string]$Key
+        )
+        $btn = New-Object System.Windows.Forms.Button
+        $btn.Text = $Text
+        $btn.Width  = 190
+        $btn.Height = 40
+
+        $startX = 20
+        $startY = 80
+        $spacingX = 200
+        $spacingY = 55
+
+        $btn.Location = New-Object System.Drawing.Point(
+            $startX + ($Col * $spacingX),
+            $startY + ($Row * $spacingY)
+        )
+
+        if ($Key) {
+            $btn.Add_Click({ Start-RepairScript $Key })
+        }
+
+        $form.Controls.Add($btn)
+    }
+
+    # Row 0
+    Add-Button -Text 'System Health Check' -Row 0 -Col 0 -Key 'SysHealthCheck'
+    Add-Button -Text 'Clean My PC'        -Row 0 -Col 1 -Key 'CleanPC'
+    Add-Button -Text 'Fix Network'        -Row 0 -Col 2 -Key 'FixNetwork'
+    Add-Button -Text 'Repair Audio'       -Row 0 -Col 3 -Key 'RepairAudio'
+    Add-Button -Text 'Repair Services'    -Row 0 -Col 4 -Key 'RepairServices'
+
+    # Row 1
+    Add-Button -Text 'Rebuild Windows Services' -Row 1 -Col 0 -Key 'RebuildServices'
+    Add-Button -Text 'Fix Disk'                 -Row 1 -Col 1 -Key 'FixDisk'
+    Add-Button -Text 'Startup Repair'           -Row 1 -Col 2 -Key 'StartupRepair'
+    Add-Button -Text 'Driver Packs (SDIO)'      -Row 1 -Col 3 -Key 'DriverPacks'
+    Add-Button -Text 'Install Game Driver'      -Row 1 -Col 4 -Key 'InstallGameDriver'
+
+    # Row 2
+    Add-Button -Text 'Malware Scan  Removal' -Row 2 -Col 0 -Key 'MalwareScan'
+    Add-Button -Text 'Verify System'         -Row 2 -Col 1 -Key 'VerifySystem'
+    Add-Button -Text 'Optimize System'       -Row 2 -Col 2 -Key 'OptimizeSystem'
+    Add-Button -Text 'Backup Tool'           -Row 2 -Col 3 -Key 'BackupTool'
+    Add-Button -Text 'AI System Diagnostics' -Row 2 -Col 4 -Key 'AISystemDiag'
+
+    # Bottom row utilities
+    $btnViewLogs = Add-Button -Text 'View Logs' -Row 3 -Col 0 -Key $null
+    $btnCheck    = Add-Button -Text 'Check Components' -Row 3 -Col 1 -Key $null
+    $btnHelp     = Add-Button -Text 'Help' -Row 3 -Col 2 -Key $null
+
+    # Wire utility buttons
+    ($form.Controls | Where-Object { $_.Text -eq 'View Logs' }).Add_Click({
+        Start-Process explorer.exe "$ScriptDir\logs" -ErrorAction SilentlyContinue
+    })
+
+    ($form.Controls | Where-Object { $_.Text -eq 'Check Components' }).Add_Click({
+        Start-RepairScript 'SysHealthCheck'
+    })
+
+    ($form.Controls | Where-Object { $_.Text -eq 'Help' }).Add_Click({
+        $helpPath = Join-Path $BaseDir 'docs\INSTALLATION_GUIDE.md'
+        if (Test-Path $helpPath) {
+            Start-Process $helpPath -ErrorAction SilentlyContinue
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Help file not found:`n$helpPath",
+                "RescuePC Repairs",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+    })
+
+    return $form
+}
+
+#endregion Main UI -------------------------------------------------------------
+
+#region Entry point ------------------------------------------------------------
+
+try {
+    Write-LauncherLog "RescuePC Repairs Launcher starting. BaseDir = $BaseDir"
+
+    # Show welcome message
+    Write-Host "=== RescuePC Repairs Toolkit ===" -ForegroundColor Cyan
+    Write-Host "Version 2.0.0 | https://rescuepcrepairs.com"
+    Write-Host ""
+
+    # If no valid cached license, show the prompt
+    if (-not $CachedLicense) {
+        $licenseInfo = Show-LicensePrompt
+        if (-not $licenseInfo) {
+            Write-Host "License activation cancelled. Running in limited mode." -ForegroundColor Yellow
+            $global:LicenseValid = $false
+        } else {
+            # Validate the new license
+            $result = Invoke-RescuePCLicenseCheck -LicenseKey $licenseInfo.LicenseKey -CustomerEmail $licenseInfo.Email
+            $global:LicenseValid = $result.ok -or $result.valid
+            $global:LicenseInfo = $result
+            
+            if ($global:LicenseValid) {
+                # Save the valid license
+                Save-LicenseCache -Email $licenseInfo.Email -LicenseKey $licenseInfo.LicenseKey -IsOwner $false -LicenseData $result.license
+                $global:LicenseSummary = if ($result.planLabel) { $result.planLabel } elseif ($result.license.planName) { $result.license.planName } else { "Valid License" }
+                $global:IsOwnerLicense = $result.license.isOwner -eq $true
+                
+                # Show license summary
+                Show-LicenseSummary -LicenseInfo $result
+            } else {
+                Write-Host "Invalid license. Running in limited mode." -ForegroundColor Red
+                if ($result.error) {
+                    $errorMessage = if ($result.message) { $result.message } else { $result.error }
+                    Write-Host "Error: $errorMessage" -ForegroundColor Red
+                }
+                
+                # Show limited mode message
+                Write-Host "`n=== Limited Mode ===" -ForegroundColor Yellow
+                Write-Host "Some features are disabled in limited mode. Please activate a valid license for full access."
+            }
+        }
+    } else {
+        # We have a cached license, show its details
+        $result = Test-CachedLicense -CachedLicense $CachedLicense
+        if ($result) {
+            $global:LicenseValid = $true
+            $global:LicenseInfo = $result
+            $global:LicenseSummary = if ($result.planLabel) { $result.planLabel } elseif ($result.license.planName) { $result.license.planName } else { "Valid License" }
+            $global:IsOwnerLicense = $result.license.isOwner -eq $true
+            
+            # Show license summary
+            Show-LicenseSummary -LicenseInfo $result
+        } else {
+            # Clear invalid cache
+            Remove-Item -Path $licenseCachePath -Force -ErrorAction SilentlyContinue
+            $global:LicenseValid = $false
+            $global:LicenseInfo = $null
+            
+            # Show limited mode message
+            Write-Host "`n=== Limited Mode ===" -ForegroundColor Yellow
+            Write-Host "Some features are disabled in limited mode. Please activate a valid license for full access."
         }
     }
 
-    # TEMPORARILY DISABLE ADMIN CHECK FOR TESTING
-    $isAdmin = Test-Administrator
-    if (-not $isAdmin) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "WARNING: Running without administrator privileges for testing.`n`nSome repair functions may not work properly.",
-            "Testing Mode",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning)
-    }
+    # Either no cache, not owner, or cached license invalid - show prompt
+    $license = Show-LicensePrompt
+    $global:LicenseValid   = $license.Valid
+    $global:LicenseSummary = $license.Summary
+    $global:IsOwnerLicense = $license.IsOwner
 
-    # Launch the main GUI
-    Show-RescuePCRepairGUI
+    $mainForm = New-MainForm
+    [void]$mainForm.ShowDialog()
 }
 catch {
-    $errorMessage = $_.Exception.Message
-    Write-Host "Error: $errorMessage" -ForegroundColor Red
-    Show-Err "An error occurred: $errorMessage"
-    exit 1
+    Write-LauncherLog "FATAL ERROR: $($_.Exception.Message)"
+    [System.Windows.Forms.MessageBox]::Show(
+        "The running command stopped due to an unexpected error:`n`n$($_.Exception.Message)",
+        "RescuePC Repairs",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
 }
+
+#endregion Entry point ---------------------------------------------------------
+
+# SIG # Begin signature block
+# MIIFfAYJKoZIhvcNAQcCoIIFbTCCBWkCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
+# gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUFpXcxoXq/l6cr/zb4nxXeVfX
+# 2YOgggMSMIIDDjCCAfagAwIBAgIQc6VPVBbWr69NGcDq7bD4HzANBgkqhkiG9w0B
+# AQUFADAfMR0wGwYDVQQDDBRSZXNjdWVQQyBSZXBhaXJzIERldjAeFw0yNTExMTkx
+# ODEzMTBaFw0yNjExMTkxODMzMTBaMB8xHTAbBgNVBAMMFFJlc2N1ZVBDIFJlcGFp
+# cnMgRGV2MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx3KkA2KmYCXZ
+# OXnSbN5geGFQXAUzKduHKxebPQBtetRR320SuBVAeMJhYqwY0tCu/dAFzNgWeLv9
+# pMT1s9oWx/C8Wy/0VcJqPrgNd9kUYsUEICHOdcahsjWOU+0874848lZr5jI2DTVT
+# CyTcdGv1t1U08kjiTtdwstZufL+cuXxruD1IqjQrNJ4n78QoUZBRvTJ5CZSEiGaE
+# wArxdEeL5yz/TTNHr6Q2ZPRMSQRV39OQy0J6CcTFvEk3VlI5T4DM3xrUHbOxA1RR
+# QCQcI0VRzgj0fuNPv7ynVvtqVFz35X640OpDtlDNS0VS0nq11Chs9c/5a2SPsuVr
+# Lo34pa5LhQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYB
+# BQUHAwMwHQYDVR0OBBYEFCpoqMab+Z6hqfItJfvTSHCgviVRMA0GCSqGSIb3DQEB
+# BQUAA4IBAQCMF/95XLfMgVqIJvmaJXBghtzSpxI4xVtp8Mc98bBy7BqdXrYh5+St
+# Pzy/fFDS4/29eZ7JVM6W4HVmdKd3Ci53NAhTmS1izKy1p89pmycl/a/WxjkB746r
+# EhFrSFWGKSDQ9rRYanCRWwx8bG6CT+Nhh/BWpRd635NjG4gNp2IY77rE2qqSf32T
+# Eu+0knLIL1TXs9EK5FWE90srv9ihoV62GPVqj4IpmICaEdTnYk/Xz/pCGK2eEPXS
+# DeFH/YohLH3VXzFWHOvHdagl5CUYkQ/TWY65nIG4rVnVYLMv+pSzN6ZodItYuiAS
+# IOSbUFHgtnpybqOq/AmaIWzRQyfcT2kEMYIB1DCCAdACAQEwMzAfMR0wGwYDVQQD
+# DBRSZXNjdWVQQyBSZXBhaXJzIERldgIQc6VPVBbWr69NGcDq7bD4HzAJBgUrDgMC
+# GgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYK
+# KwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG
+# 9w0BCQQxFgQUzCCOw8kVB4jjrIAyXYC52ZqjEBgwDQYJKoZIhvcNAQEBBQAEggEA
+# U+FO6EsUtoF+3OEHCQTkq9JMUuAP1lmiqSs+IdCUYlD4A9NlFWwmEuJYs1obST4e
+# Jc24PnaEfU/NTFOSfg7yBoj+HUpSHTRC3Icf/xhRXb7cMLp9FLYjDN3XzcneCzPv
+# cArZY2rmndpgAAmEYKmjsybhVn8DLbhPNqX0A/TSFsxeD0yb+BJjL6pGfw+/sjET
+# xKWGf1e24bLurC/+GvI0W4i1k876IQrpOjHQV5Q/vZypygGlQJr3yy/LJ+uvpLlr
+# Vy/A1pD0RowXqiQBqmbSXXs6eHuuF6+sfQISqwjBGM3VcFhxzN3WpE2H9zDen5Ee
+# rq3Uo6JWaUMpgRrSRQTfZw==
+# SIG # End signature block

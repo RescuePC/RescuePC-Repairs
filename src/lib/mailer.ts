@@ -118,7 +118,47 @@ export interface LicenseEmailOptions {
   currency: string;
 }
 
-export async function sendLicenseEmail(opts: LicenseEmailOptions) {
+export interface LicenseEmailParams {
+  to: string;
+  licenseKey: string;
+  planName: string;
+  downloadUrl: string;
+}
+
+// New simplified license email helper (as specified in requirements)
+export async function sendLicenseEmail(params: LicenseEmailParams) {
+  const { to, licenseKey, planName, downloadUrl } = params;
+
+  const subject = `Your RescuePC Repairs ${planName} license`;
+  const text = `
+Thank you for subscribing to RescuePC Repairs (${planName}).
+
+Your license key:
+${licenseKey}
+
+Download the toolkit:
+${downloadUrl}
+
+Keep this email safe. If you lose your key, contact support and we can re-issue it.
+
+– RescuePC Repairs
+`.trim();
+
+  const html = `
+    <p>Thank you for subscribing to <strong>RescuePC Repairs</strong> (${planName}).</p>
+    <p><strong>Your license key:</strong><br/>
+    <code>${licenseKey}</code></p>
+    <p><strong>Download the toolkit:</strong><br/>
+    <a href="${downloadUrl}">${downloadUrl}</a></p>
+    <p>Keep this email safe. If you lose your key, contact support and we can re-issue it.</p>
+    <p>– RescuePC Repairs</p>
+  `;
+
+  return deliverEmail({ to, subject, text, html });
+}
+
+// Legacy detailed license email function (kept for backward compatibility)
+export async function sendDetailedLicenseEmail(opts: LicenseEmailOptions) {
   const amount = (opts.amountCents / 100).toFixed(2);
 
   const html = `

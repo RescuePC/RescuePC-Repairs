@@ -1,6 +1,3 @@
-// Prisma schema for RescuePC Licensing System
-// This schema handles automated license generation from Stripe webhooks
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,22 +7,57 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model License {
-  id               String   @id @default(cuid())
-  stripeEventId    String   @unique
-  paymentIntent    String   @unique
-  checkoutSession  String?  @unique
-  customerEmail    String
-  productSku       String
-  amountCents      Int
-  currency         String   @default("usd")
-  licenseKey       String   @unique
-  status           String   @default("issued") // issued | duplicate | error | revoked
-  issuedAt         DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+model test_customers {
+  id         Int      @id @default(autoincrement())
+  email      String   @unique
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  tenantId   String   @default("default") // Multi-tenant support
 
+  @@index([tenantId]) // NEW: Tenant index for multi-tenant queries
+}
+
+model License {
+  id              String   @id @default(uuid()) @db.Uuid
+  
+  // Stripe/payment info
+  stripeEventId   String?  @map("stripe_event_id")
+  paymentIntent   String?  @map("payment_intent")
+  checkoutSession String?  @map("checkout_session")
+  amountCents     Int?     @map("amount_cents")
+  currency        String?  @map("currency")
+
+  // Customer info
+  customerEmail   String   @map("customer_email")
+  customerName    String?  @map("customer_name")
+  
+  // License details
+  licenseKey      String   @unique @map("license_key")
+  status          String   @map("status") // active, expired, revoked, etc.
+  planCode        String   @map("plan_code") // BASIC, PRO, ENTERPRISE, LIFETIME
+  planName        String   @map("plan_name")
+  
+  // Machine binding (1:1)
+  machineId       String?  @unique(map: "machine_id_unique") @map("machine_id")
+  hardwareId      String?  @unique(map: "hardware_id_unique") @map("hardware_id") // Hashed hardware fingerprint
+  
+  // Validity periods
+  issuedAt        DateTime @map("issued_at") @default(now())
+  activatedAt     DateTime? @map("activated_at")
+  expiresAt       DateTime? @map("expires_at") // Null for lifetime licenses
+  lastVerifiedAt  DateTime? @map("last_verified_at")
+  
+  // Metadata
+  tenantId        String?  @map("tenant_id") @default("default")
+  createdAt       DateTime @map("created_at") @default(now())
+  updatedAt       DateTime @map("updated_at") @updatedAt
+  
+  // Enforce one license per machine
+  @@unique([machineId, hardwareId], name: "license_machine_binding")
+  
+  // Indexes for common queries
   @@index([customerEmail])
-  @@index([productSku])
   @@index([status])
+  @@index([planCode])
+  
+  @@map("licenses")
 }

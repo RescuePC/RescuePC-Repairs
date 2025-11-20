@@ -83,6 +83,9 @@ npm run scripts/build/deploy-production.ps1  # Full deployment
 ```bash
 npm run desktop:audit          # Run script audits
 npm run desktop:run            # Launch application
+npm run test:api               # Hit API endpoints (dev server must be running)
+npm run test:all               # Lint + build + API smoke tests
+pwsh -File scripts/test-api-endpoints.ps1   # PowerShell wrapper
 ```
 
 ### Database

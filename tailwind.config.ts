@@ -10,16 +10,15 @@ const config: Config = {
     extend: {
       colors: {
         primary: {
-          50: '#eff6ff',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
+          DEFAULT: 'rgb(37 99 235)',
+          dark: 'rgb(29 78 216)',
         },
       },
     },
   },
   plugins: [],
 }
+
 export default config
 
 

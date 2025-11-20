@@ -1,0 +1,225 @@
+RescuePC Repairs - Licensing Database SOP
+=========================================
+
+Goal
+----
+Central, secure, always-on database for RescuePC licensing.
+
+Use it to:
+- Track customer email
+- Track which package they bought
+- Track timestamps (created, purchased, expires)
+- Validate license keys for the RescuePC .exe via a simple API
+
+Target stack
+------------
+- Database: PostgreSQL (hosted: Neon / Railway / Supabase)
+- Backend: Next.js on Vercel
+- Frontend / App: RescuePC.exe calls a single API endpoint
+- Secret handling: Vercel environment variable
+
+High level flow
+---------------
+GitHub repo (RescuePC) -> Vercel -> Custom domain (site + API)
+Windows RescuePC.exe -> HTTPS POST -> /api/verify-license -> DB
+
+The exe never touches the database directly.
+Only the API talks to the database.
+
+Part 1 - PostgreSQL setup
+-------------------------
+
+1. Create a hosted PostgreSQL database (pick one):
+   - Neon
+   - Railway
+   - Supabase
+
+2. From provider dashboard, get the Postgres connection string:
+   Example:
+   postgres://user:password@host:5432/rescuepc
+
+3. In the provider SQL console, create the minimal schema:
+
+   CREATE TABLE customers (
+       id          SERIAL PRIMARY KEY,
+       email       TEXT NOT NULL UNIQUE,
+       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   );
+
+   CREATE TABLE packages (
+       id            SERIAL PRIMARY KEY,
+       code          TEXT NOT NULL UNIQUE,    -- 'BASIC', 'PRO', etc.
+       name          TEXT NOT NULL,
+       duration_days INTEGER NOT NULL
+   );
+
+   CREATE TABLE licenses (
+       id           SERIAL PRIMARY KEY,
+       customer_id  INTEGER NOT NULL REFERENCES customers(id),
+       package_id   INTEGER NOT NULL REFERENCES packages(id),
+       license_key  TEXT NOT NULL UNIQUE,
+       purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       expires_at   TIMESTAMPTZ NOT NULL,
+       status       TEXT NOT NULL CHECK (status IN ('active', 'expired', 'revoked'))
+   );
+
+4. Seed some basic data for testing:
+   - Insert at least one row into packages (BASIC / PRO etc).
+   - Optionally insert one test customer, one test license.
+
+Part 2 - Vercel environment variable
+------------------------------------
+
+Project: RescuePC (Next.js app deployed on Vercel)
+
+1. In Vercel dashboard:
+   - Go to: Project -> Settings -> Environment Variables
+   - Add:
+
+     Name: DATABASE_URL
+     Value: postgres://user:password@host:5432/rescuepc
+     Environments: Production (and Preview if desired)
+
+2. Save and redeploy the project.
+
+3. Local development (optional but recommended):
+   - In the RescuePC repo root, create .env.local (this file is ignored by Git).
+   - Add:
+
+     DATABASE_URL=postgres://user:password@host:5432/rescuepc
+
+   Now process.env.DATABASE_URL works both locally and on Vercel.
+
+Part 3 - Next.js DB connection (lib/db.ts)
+------------------------------------------
+
+In the RescuePC repo, create:
+
+File: lib/db.ts
+
+Code:
+
+import { Pool } from "pg";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is not set");
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Optional tuning later
+});
+
+export default pool;
+
+This is the one shared connection pool for all API routes that need the DB.
+
+Part 4 - License validation API (app/api/verify-license/route.ts)
+-----------------------------------------------------------------
+
+Create the API endpoint that the RescuePC.exe will call.
+
+File: app/api/verify-license/route.ts
+
+Code:
+
+import pool from "@/lib/db";
+
+export async function POST(request: Request) {
+  try {
+    const { email, licenseKey } = await request.json();
+
+    if (!email || !licenseKey) {
+      return new Response(
+        JSON.stringify({ valid: false, error: "Missing email or licenseKey" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const result = await pool.query(
+      `
+      SELECT 1
+      FROM licenses l
+      JOIN customers c ON c.id = l.customer_id
+      WHERE c.email = $1
+        AND l.license_key = $2
+        AND l.status = 'active'
+        AND l.expires_at > NOW()
+      `,
+      [email, licenseKey]
+    );
+
+    const valid = result.rowCount === 1;
+
+    return new Response(
+      JSON.stringify({ valid }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (err) {
+    console.error("verify-license error:", err);
+    return new Response(
+      JSON.stringify({ valid: false, error: "Server error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
+
+Behavior:
+- Input: JSON body { "email": string, "licenseKey": string }
+- Output: JSON body { "valid": boolean, "error"?: string }
+
+Part 5 - RescuePC.exe integration
+---------------------------------
+
+The exe does not connect to Postgres directly.
+
+Flow:
+1. User runs RescuePC.exe
+2. App prompts for:
+   - Email
+   - License key
+3. App sends POST request to:
+   https://YOUR_DOMAIN/api/verify-license
+
+   Body:
+   {
+     "email": "user@example.com",
+     "licenseKey": "ABC-123-XYZ"
+   }
+
+4. App reads JSON response:
+   - If valid = true:
+       continue, ask for admin rights, open GUI, allow repairs
+   - If valid = false:
+       show "Invalid or expired license" message and exit
+
+Part 6 - Testing checklist
+--------------------------
+
+1. Verify DB is reachable:
+   - Use provider console or a DB client to run:
+     SELECT * FROM packages;
+   - Confirm you see the seeded rows.
+
+2. Verify Vercel env variable:
+   - Deploy app.
+   - Temporarily log process.env.DATABASE_URL on server (or just check pool can connect).
+   - Remove any logs once confirmed.
+
+3. Test API manually:
+   - Use curl, Postman, or browser:
+
+     POST https://YOUR_DOMAIN/api/verify-license
+     Body: { "email": "test@example.com", "licenseKey": "TEST-KEY" }
+
+   - Check if response matches expected valid / invalid.
+
+4. Wire exe:
+   - Call the endpoint above from the app at startup when user enters license.
+   - Handle true / false result as described.
+
+Once all of this works, the licensing system is considered production ready:
+- Centralized data
+- SaaS friendly
+- No secrets in GitHub
+- DB runs even when personal PC is off
