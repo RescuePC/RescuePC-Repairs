@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createHash } from "crypto";
+import fs from "fs";
+import path from "path";
+
+export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const token = searchParams.get("token");
-    const email = searchParams.get("email");
+    const email = searchParams.get("email")?.trim().toLowerCase();
 
     if (!token || !email) {
       return NextResponse.json(
@@ -15,7 +19,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Verify token matches expected hash (email + timestamp + secret)
     const expectedHash = createHash("sha256")
       .update(`${email}${process.env.DOWNLOAD_SECRET}`)
       .digest("hex");
@@ -27,7 +30,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Verify user has active license
     const license = await prisma.license.findFirst({
       where: {
         customerEmail: email,
@@ -42,9 +44,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Serve the secure download
-    const fs = require("fs");
-    const path = require("path");
     const filePath = path.join(process.cwd(), "public", "downloads", "RescuePC-Setup.exe");
 
     if (!fs.existsSync(filePath)) {
@@ -55,15 +54,17 @@ export async function GET(req: NextRequest) {
     }
 
     const fileBuffer = fs.readFileSync(filePath);
-    
+
     return new NextResponse(fileBuffer, {
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="RescuePC-Setup.exe"`,
+        "Content-Disposition": 'attachment; filename="RescuePC-Setup.exe"',
         "Content-Length": fileBuffer.length.toString(),
+        "Cache-Control": "private, no-store, max-age=0",
+        "X-Content-Type-Options": "nosniff",
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Secure download error:", err);
     return NextResponse.json(
       { error: "Download failed" },
