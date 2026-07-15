@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from "next/link";
+import JsonLd from "@/components/JsonLd";
+import { organizationJsonLd, softwareApplicationJsonLd, websiteJsonLd } from "@/lib/seo";
 
 // Memoize features to prevent unnecessary re-renders
 const features = [
@@ -35,6 +37,15 @@ const features = [
     description: "Backup important user folders and run Windows Defender deep scans plus a security status report.",
     icon: "🛡️"
   }
+] as const;
+
+const repairWorkflows = [
+  "Windows Update repair and service checks",
+  "Network repair for DNS, adapters, and connectivity issues",
+  "Slow startup cleanup and performance optimization",
+  "BSOD troubleshooting support through guided diagnostics",
+  "High CPU usage investigation for common Windows bottlenecks",
+  "Backup and security checks before deeper repair work",
 ] as const;
 
 export default function Home() {
@@ -87,7 +98,9 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-gray-50">
+      <JsonLd id="home-jsonld" data={[organizationJsonLd, websiteJsonLd, softwareApplicationJsonLd]} />
+
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-blue-600 via-blue-700 to-blue-800 text-white py-20">
         <div className="max-w-7xl mx-auto px-6">
@@ -96,7 +109,7 @@ export default function Home() {
               Automated Windows Repair Software
             </h1>
             <p className="text-lg md:text-xl text-blue-100 mb-8">
-              One launcher for scripted diagnostics, driver checks, and repair workflows. Licensed per machine with annual or lifetime plans.
+              One PC repair toolkit for scripted diagnostics, Windows Update repair, network fixes, BSOD troubleshooting, driver checks, and startup cleanup workflows. Licensed per machine with annual or lifetime plans.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
@@ -123,7 +136,7 @@ export default function Home() {
               Everything You Need to Repair Windows
             </h2>
             <p className="text-lg text-slate-600 max-w-3xl mx-auto">
-              Comprehensive tools for diagnosing, repairing, and optimizing Windows systems
+              Comprehensive tools for diagnosing, repairing, and optimizing Windows systems without forcing technicians to rebuild the same repair checklist every time.
             </p>
           </div>
 
@@ -139,6 +152,41 @@ export default function Home() {
                 </p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Search Intent Section */}
+      <section className="py-16 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+            <div>
+              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
+                Built for Real PC Repair Workflows
+              </h2>
+              <p className="text-lg text-slate-600 leading-relaxed">
+                RescuePC Repairs is designed for repeatable Windows repair jobs: slow computers, broken networking, failed updates, high CPU usage, audio service problems, and technician cleanup routines. The goal is simple: keep the repair process consistent, documented, and faster than doing every command by hand.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link href="/pricing" className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700">
+                  Compare license plans
+                </Link>
+                <Link href="/download" className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-800 hover:bg-white">
+                  Download after purchase
+                </Link>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-xl font-bold text-slate-900">Common repair targets</h3>
+              <ul className="mt-4 space-y-3 text-slate-700">
+                {repairWorkflows.map((workflow) => (
+                  <li key={workflow} className="flex gap-3">
+                    <span className="text-blue-600">✓</span>
+                    <span>{workflow}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
       </section>
@@ -165,6 +213,6 @@ export default function Home() {
           )}
         </div>
       </section>
-    </div>
+    </main>
   );
 }

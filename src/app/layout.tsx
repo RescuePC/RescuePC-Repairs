@@ -1,20 +1,10 @@
-import React from 'react';
-import type { Metadata } from "next";
+import React from "react";
 import "./globals.css";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import { rootMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "RescuePC Repairs - Professional Windows Repair Toolkit",
-  description: "Automated diagnostics, driver management, security scanning, and system optimization for Windows. Professional repair tools with AI-powered diagnostics.",
-  keywords: ["Windows repair", "system diagnostics", "driver management", "malware removal", "PC optimization"],
-  authors: [{ name: "RescuePC Repairs" }],
-  openGraph: {
-    title: "RescuePC Repairs - Professional Windows Repair Toolkit",
-    description: "Automated diagnostics, driver management, security scanning, and system optimization for Windows.",
-    type: "website",
-  },
-};
+export const metadata = rootMetadata;
 
 export default function RootLayout({
   children,
@@ -25,7 +15,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="min-h-screen flex flex-col">
         <Header />
-        <main className="flex-grow">{children}</main>
+        <div className="flex-grow">{children}</div>
         <Footer />
       </body>
     </html>

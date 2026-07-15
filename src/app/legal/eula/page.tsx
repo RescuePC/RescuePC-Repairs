@@ -1,5 +1,8 @@
 /* eslint-disable react/no-unescaped-entities */
 
+import JsonLd from "@/components/JsonLd";
+import { breadcrumbJsonLd, createMetadata } from "@/lib/seo";
+
 const sections = [
   {
     title: "1. Grant of License",
@@ -77,14 +80,24 @@ const sections = [
   },
 ];
 
-export const metadata = {
-  title: "End User License Agreement | RescuePC Repairs",
-  description: "Official terms governing the RescuePC Repairs Toolkit. Read before deploying the software in production environments.",
-};
+export const metadata = createMetadata({
+  title: "End User License Agreement",
+  description:
+    "Read the RescuePC Repairs End User License Agreement for software usage rights, restrictions, privacy, warranty, and liability terms.",
+  path: "/legal/eula/",
+});
+
+const breadcrumbs = breadcrumbJsonLd([
+  { name: "Home", path: "/" },
+  { name: "Legal", path: "/legal/eula/" },
+  { name: "End User License Agreement", path: "/legal/eula/" },
+]);
 
 export default function EulaPage() {
   return (
     <main className="mx-auto max-w-5xl px-6 py-16 text-slate-900">
+      <JsonLd id="eula-breadcrumbs-jsonld" data={breadcrumbs} />
+
       <div className="mb-8">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Legal</p>
         <h1 className="mt-2 text-4xl font-bold">End User License Agreement (EULA)</h1>

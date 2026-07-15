@@ -1,5 +1,8 @@
 /* eslint-disable react/no-unescaped-entities */
 
+import JsonLd from "@/components/JsonLd";
+import { breadcrumbJsonLd, createMetadata } from "@/lib/seo";
+
 const overview = [
   {
     title: "License Types",
@@ -35,14 +38,24 @@ const overview = [
   },
 ];
 
-export const metadata = {
-  title: "License Terms | RescuePC Repairs",
-  description: "Licensing overview, activation rules, and compliance policy for the RescuePC Repairs Toolkit.",
-};
+export const metadata = createMetadata({
+  title: "License Terms",
+  description:
+    "Review RescuePC Repairs license types, activation rules, compliance expectations, and support requirements for toolkit usage.",
+  path: "/legal/license/",
+});
+
+const breadcrumbs = breadcrumbJsonLd([
+  { name: "Home", path: "/" },
+  { name: "Legal", path: "/legal/license/" },
+  { name: "License Terms", path: "/legal/license/" },
+]);
 
 export default function LicensePage() {
   return (
     <main className="mx-auto max-w-4xl px-6 py-16 text-slate-900">
+      <JsonLd id="license-breadcrumbs-jsonld" data={breadcrumbs} />
+
       <header className="mb-10">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Legal</p>
         <h1 className="mt-2 text-4xl font-bold">License Terms</h1>

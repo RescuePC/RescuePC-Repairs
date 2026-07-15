@@ -32,6 +32,16 @@ const nextConfig: NextConfig = {
   },
   output: "standalone",
   trailingSlash: true,
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "rescuepcrepairs.com" }],
+        destination: "https://www.rescuepcrepairs.com/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
