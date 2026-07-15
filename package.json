@@ -10,6 +10,7 @@
     "lint:fix": "eslint --fix",
     "test": "npm run lint && npm run build",
     "test:api": "node scripts/test-api-endpoints.mjs",
+    "test:seo": "node scripts/seo-smoke.mjs",
     "test:all": "npm run lint && npm run build && npm run test:api",
     "test:security": "powershell -ExecutionPolicy Bypass -File .\\scripts\\security-audit.ps1 -GenerateReport",
     "test:security:fix": "powershell -ExecutionPolicy Bypass -File .\\scripts\\security-audit.ps1 -FixIssues -GenerateReport",
