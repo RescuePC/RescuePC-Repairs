@@ -98,7 +98,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-gray-50">
       <JsonLd id="home-jsonld" data={[organizationJsonLd, websiteJsonLd, softwareApplicationJsonLd]} />
 
       {/* Hero Section */}
@@ -213,6 +213,6 @@ export default function Home() {
           )}
         </div>
       </section>
-    </div>
+    </main>
   );
 }
