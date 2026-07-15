@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import JsonLd from "@/components/JsonLd";
+import { pricingProductJsonLd } from "@/lib/seo";
 
 const plans = [
   {
@@ -72,6 +74,8 @@ export default function Pricing() {
   const [loadingPlan, setLoadingPlan] = React.useState<string | null>(null);
   return (
     <main className="min-h-screen bg-slate-50 py-20">
+      <JsonLd id="pricing-product-jsonld" data={pricingProductJsonLd} />
+
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-4">
